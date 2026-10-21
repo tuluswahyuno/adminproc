@@ -1,0 +1,12 @@
+{
+  "name": "spj-pengadaan",
+  "private": true,
+  "scripts": {
+    "install:all": "npm i --prefix server && npm i --prefix web",
+    "dev:server": "npm run dev --prefix server",
+    "dev:web": "npm run dev --prefix web",
+    "build": "npm run build --prefix web",
+    "push": "cmd /c push.bat",
+    "start": "npm run build && npm start --prefix server"
+  }
+}

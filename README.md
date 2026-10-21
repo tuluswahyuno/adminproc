@@ -1,0 +1,47 @@
+# SPJ Pengadaan — RSUD dr. Soeratno Gemolong
+
+Aplikasi web untuk membuat dokumen **A2 (Surat Bukti Pengeluaran, A5)** dan **Lembar Verifikasi** (Word & PDF) dari satu kali input.
+
+## Fitur Fase 1
+- Login multi-pengguna (admin / staf), ganti password.
+- Impor Excel **Realisasi Belanja** → kode rekening, pagu, realisasi, PPKom/PPTK/Pejabat Pengadaan.
+- Input SPJ: pilih kode rekening → pejabat terisi otomatis; terbilang & pajak (PPN 11% + PPh 22 1,5%, rumus sama dengan contoh Excel) dihitung otomatis.
+- Kategori nilai otomatis: 0–2 jt, 2–10 jt, 10–50 jt, 50–750 jt (dasar untuk Fase 2).
+- Cetak A2 & Verifikasi → PDF atau Word, dengan pratinjau.
+- Verifikator/KPA/Bendahara dikelola di Pengaturan; setiap SPJ menyimpan pejabat saat dibuat (aman jika verifikator berganti tahun depan).
+- Peringatan jika melebihi sisa pagu.
+
+## Menjalankan (butuh Node.js 22.5+)
+```bash
+npm run install:all          # sekali saja
+npm start                    # build web + jalankan server di http://localhost:3001
+```
+Login awal: `admin` / `admin123` — **segera ganti** lewat tombol Password.
+
+Mode pengembangan: `npm run dev:server` dan `npm run dev:web` (http://localhost:5173).
+
+## Deploy ke server kantor / VPS
+```bash
+npm run install:all && npm run build
+PORT=3001 APP_SECRET=<string-acak-panjang> node server/index.js     # atau pm2 start server/index.js
+```
+## Konfigurasi Database (MySQL Laragon)
+Aplikasi terhubung ke MySQL (Laragon):
+- Host: `127.0.0.1` (Port: `3306`)
+- User: `root`
+- Password: *(kosong)*
+- Database: `db_spj_proc`
+
+Konfigurasi dapat diatur melalui file `server/.env`:
+```env
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=db_spj_proc
+PORT=3001
+```
+
+## Struktur
+- `server/` — Express + MySQL (`mysql2/promise`), pembuat dokumen (`lib/docs.js`: `docx` + `pdfkit`), impor Excel.
+- `web/` — React + Vite + Tailwind.

@@ -215,8 +215,8 @@ export default function Login({ onLogin }) {
                 </button>
               </form>
 
-              {/* Quick Login Chips ala Ailene demo buttons */}
-              <div className="mt-6 border-t border-[#122922]/15 pt-4">
+              {/* Akun cepat hanya untuk mode pengembangan (npm run dev:web); tidak ikut build produksi */}
+              {import.meta.env.DEV && <div className="mt-6 border-t border-[#122922]/15 pt-4">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="font-mono text-[10px] font-extrabold uppercase tracking-wider text-[#122922]/55">
                     Pilih Akun Cepat (Testing):
@@ -247,7 +247,7 @@ export default function Login({ onLogin }) {
                     <span className="font-mono text-[10px] text-[#122922]/60">tulus / 123456</span>
                   </button>
                 </div>
-              </div>
+              </div>}
 
               {/* Footer Note */}
               <div className="mt-5 text-center text-[10px] text-[#122922]/50">

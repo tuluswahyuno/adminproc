@@ -3,18 +3,20 @@ import { BrowserRouter, NavLink, Navigate, Route, Routes, Link, useNavigate } fr
 import {
   FileText, LayoutDashboard, ListTree, LogOut, Receipt, Settings,
   Users, Building2, KeyRound, Plus, Sparkles, Menu, X, ChevronRight, ShieldCheck,
-  UserCog, Calendar, RefreshCw
+  UserCog, Calendar, RefreshCw, Hash
 } from 'lucide-react'
 import { api, ROLE_LABEL, PERAN } from './lib'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Transaksi from './pages/Transaksi'
 import TransaksiForm from './pages/TransaksiForm'
+import PengadaanWizard from './pages/PengadaanWizard'
 import Rekening from './pages/Rekening'
 import Pejabat from './pages/Pejabat'
 import Penyedia from './pages/Penyedia'
 import Pengguna from './pages/Pengguna'
 import Pengaturan from './pages/Pengaturan'
+import Nomor from './pages/Nomor'
 import { Modal, Field, SearchableSelect, BuatDokumenMenu } from './ui'
 
 const Auth = createContext(null)
@@ -23,6 +25,7 @@ export const useAuth = () => useContext(Auth)
 const NAV = [
   { to: '/', label: 'Dashboard', desc: 'Ringkasan & analitik anggaran', icon: LayoutDashboard, end: true },
   { to: '/transaksi', label: 'Dokumen Pengadaan', desc: 'Kelola paket & berkas SPJ', icon: Receipt },
+  { to: '/nomor', label: 'Monitoring Nomor', desc: 'Buku register nomor surat', icon: Hash },
   { to: '/rekening', label: 'Kode Rekening', desc: 'Struktur & pagu anggaran RBA', icon: ListTree },
   { to: '/penyedia', label: 'Data Penyedia', desc: 'Direktori rekanan & perusahaan', icon: Building2 },
   { to: '/pejabat', label: 'Pejabat & Tim', desc: 'Pejabat Pengadaan, PPK & PPTK', icon: Users },
@@ -454,6 +457,9 @@ export default function App() {
             <Route path="/transaksi" element={<Transaksi />} />
             <Route path="/transaksi/baru" element={<TransaksiForm />} />
             <Route path="/transaksi/:id" element={<TransaksiForm />} />
+            <Route path="/pengadaan/baru" element={<PengadaanWizard />} />
+            <Route path="/pengadaan/:id" element={<PengadaanWizard />} />
+            <Route path="/nomor" element={<Nomor />} />
             <Route path="/rekening" element={<Rekening />} />
             <Route path="/penyedia" element={<Penyedia />} />
             <Route path="/pejabat" element={<Pejabat />} />

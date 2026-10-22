@@ -39,7 +39,7 @@ export function filterDokByTahap(tahap, modePengadaan = '0_10') {
     const plOrder = [
       'spektek', 'hps', 'undangan_pl', 'ba_pembukaan', 'ba_evaluasi',
       'undangan_klarifikasi', 'bakn', 'ba_penetapan', 'bahpl', 'pengumuman_pl',
-      'laporan_pl', 'sppbj', 'spk', 'bast', 'baphp', 'a2', 'verifikasi'
+      'laporan_pl', 'spk', 'sppbj', 'bast', 'baphp', 'a2', 'verifikasi'
     ]
     let maxIdx = plOrder.length
     if (tahap === 'spektek') maxIdx = 1
@@ -174,6 +174,11 @@ export function PreviewModal({ preview, onClose, onSwitch }) {
   )
 }
 
+// paket 10-50 jt dan 50-750 jt dikerjakan di wizard; langkahnya dipilih otomatis
+const linkPaket = (t, mode) => (['10_50', '50_750'].includes(t.mode_pengadaan)
+  ? `/pengadaan/${t.id}`
+  : `/transaksi/${t.id}${mode ? '?mode=' + mode : ''}`)
+
 export default function Transaksi() {
   const { user, tahun, setTahun, tahunList } = useAuth()
   const [rows, setRows] = useState(null)
@@ -295,10 +300,10 @@ export default function Transaksi() {
         <Link to="/transaksi/baru" className="btn-ghost !border-[#122922] !bg-[#d6ee30]/60">
           <Plus size={15} strokeWidth={2.5} /> Paket 0–2 Jt & 2–10 Jt (SP)
         </Link>
-        <Link to="/transaksi/baru?mode=10_50" className="btn-lime">
+        <Link to="/pengadaan/baru?tier=10_50" className="btn-lime">
           <FileText size={15} /> Paket 10–50 Jt
         </Link>
-        <Link to="/transaksi/baru?mode=50_750" className="btn-primary">
+        <Link to="/pengadaan/baru?tier=50_750" className="btn-primary">
           <FileText size={15} /> Paket 50–750 Jt
         </Link>
       </PageHeader>
@@ -485,7 +490,7 @@ export default function Transaksi() {
                             <Clock size={11} /> 1. Spektek / KAK
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=hps`}
+                            to={linkPaket(t, 'hps')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#f6db5b] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#ecd04d]"
                           >
                             + Buat HPS →
@@ -497,7 +502,7 @@ export default function Transaksi() {
                             <Clock size={11} /> 2. Penetapan HPS
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=${is50750 ? 'undangan' : 'negosiasi'}`}
+                            to={linkPaket(t, is50750 ? 'undangan' : 'negosiasi')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#c8e220]"
                           >
                             {is50750 ? '+ Undangan PL →' : '+ BA Klarifikasi & Nego →'}
@@ -509,7 +514,7 @@ export default function Transaksi() {
                             <Clock size={11} /> 3. Undangan PL
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=evaluasi`}
+                            to={linkPaket(t, 'evaluasi')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#c8e220]"
                           >
                             + Evaluasi Penawaran →
@@ -521,7 +526,7 @@ export default function Transaksi() {
                             <Clock size={11} /> 4. Evaluasi PL
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=negosiasi`}
+                            to={linkPaket(t, 'negosiasi')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#c8e220]"
                           >
                             + Klarifikasi & Nego →
@@ -533,7 +538,7 @@ export default function Transaksi() {
                             <Clock size={11} /> {is50750 ? '5. BA Klarifikasi' : '3. BA Negosiasi'}
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=${is50750 ? 'penetapan' : 'sp'}`}
+                            to={linkPaket(t, is50750 ? 'penetapan' : 'sp')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#c8e220]"
                           >
                             {is50750 ? '+ Penetapan Pemenang →' : '+ Buat Surat Pesanan →'}
@@ -545,7 +550,7 @@ export default function Transaksi() {
                             <Clock size={11} /> 6. Penetapan & Lap.
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=kontrak`}
+                            to={linkPaket(t, 'kontrak')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#a9dcf0] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#92cbdf]"
                           >
                             + SPPBJ & SPK →
@@ -557,7 +562,7 @@ export default function Transaksi() {
                             <Clock size={11} /> 7. Kontrak SPK
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=terima`}
+                            to={linkPaket(t, 'terima')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#c8e220]"
                           >
                             + BAST & SPJ →
@@ -573,7 +578,7 @@ export default function Transaksi() {
                             <Clock size={11} /> Surat Pesanan (SP)
                           </span>
                           <Link
-                            to={`/transaksi/${t.id}?mode=terima`}
+                            to={linkPaket(t, 'terima')}
                             className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#c8e220]"
                           >
                             + Buat BAST & A2 →
@@ -586,7 +591,7 @@ export default function Transaksi() {
                       <div className="flex flex-wrap items-center justify-end gap-1">
                         <CetakMenu id={t.id} tahap={modeTahap} modePengadaan={modePengadaan} onPreview={setPreview} />
                         <Link
-                          to={`/transaksi/${t.id}`}
+                          to={linkPaket(t, '')}
                           className="rounded-lg border border-[#122922]/20 p-1.5 text-[#122922] hover:bg-[#d6ee30]"
                           title="Ubah / Lanjutkan Tahap"
                         >

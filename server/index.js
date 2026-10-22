@@ -6,8 +6,9 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { db, getSettings, migrateSchema, INDUK_MAP } = require('./lib/db');
 const { kategori, KATEGORI, hitungPajak, passwordAcak } = require('./lib/util');
-const { buatDokumen } = require('./lib/docs');
+const { buatDokumen, getSpektekData } = require('./lib/docs');
 const { importRealisasi, listSheets, generateTemplateExcel } = require('./lib/import');
+const { daftarNomor, saranNomor, nomorManualSet, bagian: bagianNomor } = require('./lib/nomor');
 
 const PORT = process.env.PORT || 3001;
 const dataDir = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -328,11 +329,18 @@ app.delete('/api/penyedia/:id', adminOrPep, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/* ---------- teks standar KAK (yang dicetak bila kolom dikosongkan) ---------- */
+app.get('/api/spektek/standar', wrap(async (req, res) => {
+  const std = getSpektekData({ spektek: {}, items: [], rek: { uraian: String(req.query.paket || '') }, t: {} });
+  delete std.tanggal;
+  res.json(std);
+}));
+
 /* ---------- penomoran otomatis HPS, BAKN, SP, BAST & BAPHP ---------- */
 app.get('/api/penomoran/next', wrap(async (req, res) => {
   const s = await getSettings();
   const tahun = req.query.tahun || s.tahun || String(new Date().getFullYear());
-  const rows = await db.prepare('SELECT hps_no_urut, sp_no_urut, bast_no_urut, spk_no_urut, pl_json FROM transaksi WHERE SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=?').all(tahun);
+  const rows = await db.prepare('SELECT hps_no_urut, bakn_no_urut, sp_no_urut, bast_no_urut, spk_no_urut, pl_json FROM transaksi WHERE SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=?').all(tahun);
   // Nomor terakhir tiap buku register; dipakai bila belum ada data di tahun tsb.
   const maks = { hps: 1285, sp: 1606, bast: 1630, undangan: 2435, pembukaan: 2572, klarifikasi: 2577, penetapan: 2655, laporan: 2656, sppbj: 1768, spk: 2672 };
   // '2573.b' -> 2573
@@ -343,6 +351,7 @@ app.get('/api/penomoran/next', wrap(async (req, res) => {
   for (const r of rows) {
     naik('hps', r.hps_no_urut);
     naik('sp', r.sp_no_urut);
+    naik('sp', r.bakn_no_urut); // BAKN dinomori sederet dengan SP (N.a)
     naik('bast', r.bast_no_urut);
     naik('spk', r.spk_no_urut);
     let pl = {};
@@ -362,18 +371,28 @@ app.get('/api/penomoran/next', wrap(async (req, res) => {
     naik('sppbj', pl.sppbj_no_urut);
     naik('spk', pl.spk_no_urut);
   }
-  const nextHps = String(maks.hps + 1);
-  const nextSp = String(maks.sp + 1);
+  // lewati nomor yang sudah dicatat manual di menu Monitoring Nomor
+  const manual = await nomorManualSet(tahun);
+  const bebas = (n, sufiks = ['']) => {
+    while (sufiks.some((s) => manual.has(`${n}${s}`.toLowerCase()))) n += 1;
+    return n;
+  };
+  const nSp = bebas(maks.sp + 1, ['', '.a']);
+  const nBast = bebas(maks.bast + 1, ['', '.a']);
+  const nPembukaan = bebas(maks.pembukaan + 1, ['', '.b', '.c']);
+  const nPenetapan = bebas(maks.penetapan + 1, ['', '.a', '.b']);
+  const nextHps = String(bebas(maks.hps + 1));
+  const nextSp = String(nSp);
   const nextBakn = `${nextSp}.a`;
-  const nextBast = String(maks.bast + 1);
+  const nextBast = String(nBast);
   const nextBaphp = `${nextBast}.a`;
-  const nextUndanganPl = String(maks.undangan + 1);
-  const nextPembukaan = String(maks.pembukaan + 1);
-  const nextPenetapan = String(maks.penetapan + 1);
-  const nextPlLaporan = String(Math.max(maks.laporan + 1, maks.penetapan + 2));
-  const nextPlUndanganKlarifikasi = `${Math.max(maks.klarifikasi + 1, maks.pembukaan + 6)}.a`;
-  const nextSppbj = String(maks.sppbj + 1);
-  const nextSpk = String(maks.spk + 1);
+  const nextUndanganPl = String(bebas(maks.undangan + 1));
+  const nextPembukaan = String(nPembukaan);
+  const nextPenetapan = String(nPenetapan);
+  const nextPlLaporan = String(bebas(Math.max(maks.laporan + 1, nPenetapan + 1)));
+  const nextPlUndanganKlarifikasi = `${bebas(Math.max(maks.klarifikasi + 1, nPembukaan + 5), ['', '.a'])}.a`;
+  const nextSppbj = String(bebas(maks.sppbj + 1));
+  const nextSpk = String(bebas(maks.spk + 1, ['', '.a']));
   res.json({
     // nama yang dibaca TransaksiForm.jsx
     nextPlUndangan: nextUndanganPl,
@@ -413,6 +432,63 @@ app.get('/api/penomoran/next', wrap(async (req, res) => {
   });
 }));
 
+/* ---------- monitoring nomor surat ---------- */
+const bolehNomor = (req, res, next) => (['admin', 'superuser', 'pep', 'pejabat_pengadaan'].includes(req.user.role)
+  ? next() : res.status(403).json({ error: 'Hanya Admin / PEP / Pejabat Pengadaan' }));
+const tahunNomor = async (v) => String(v && v !== 'semua' ? v : (await getSettings()).tahun || new Date().getFullYear());
+
+app.get('/api/nomor', wrap(async (req, res) => {
+  const tahun = await tahunNomor(req.query.tahun);
+  res.json({ tahun, items: await daftarNomor(tahun) });
+}));
+app.get('/api/nomor/saran', wrap(async (req, res) => {
+  try {
+    res.json({ no_urut: await saranNomor(await tahunNomor(req.query.tahun), String(req.query.acuan || ''), req.query.arah === 'atas' ? 'atas' : 'bawah') });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+
+async function bacaNomorManual(req) {
+  const b = req.body || {};
+  const tahun = await tahunNomor(b.tahun);
+  const no_urut = String(b.no_urut || '').trim().toLowerCase();
+  if (!bagianNomor(no_urut)) throw new Error('Nomor urut harus berupa angka, boleh dengan sufiks huruf (mis. 2574 atau 2573.a)');
+  if (!String(b.perihal || '').trim()) throw new Error('Untuk keperluan apa nomor ini wajib diisi');
+  return { tahun, no_urut, perihal: String(b.perihal).trim().slice(0, 255), tanggal: b.tanggal || null, keterangan: String(b.keterangan || '').trim().slice(0, 500) };
+}
+// nomor tidak boleh sama dengan nomor yang sudah dipakai dokumen/catatan lain
+async function pastikanNomorKosong(n, idManualSendiri) {
+  const ada = (await daftarNomor(n.tahun)).find((i) => i.no_urut.toLowerCase() === n.no_urut && !(i.sumber === 'manual' && i.manual_id === idManualSendiri));
+  if (ada) throw new Error(`Nomor ${n.no_urut} sudah dipakai: ${ada.jenis}`);
+}
+app.post('/api/nomor', bolehNomor, wrap(async (req, res) => {
+  try {
+    const n = await bacaNomorManual(req);
+    await pastikanNomorKosong(n, null);
+    const r = await db.prepare('INSERT INTO nomor_manual(tahun,no_urut,perihal,tanggal,keterangan,dibuat_oleh) VALUES(?,?,?,?,?,?)')
+      .run(n.tahun, n.no_urut, n.perihal, n.tanggal, n.keterangan, req.user.id);
+    res.json({ id: Number(r.lastInsertRowid) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+app.put('/api/nomor/:id', bolehNomor, wrap(async (req, res) => {
+  try {
+    const n = await bacaNomorManual(req);
+    await pastikanNomorKosong(n, Number(req.params.id));
+    await db.prepare('UPDATE nomor_manual SET tahun=?,no_urut=?,perihal=?,tanggal=?,keterangan=? WHERE id=?')
+      .run(n.tahun, n.no_urut, n.perihal, n.tanggal, n.keterangan, req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+app.delete('/api/nomor/:id', bolehNomor, wrap(async (req, res) => {
+  await db.prepare('DELETE FROM nomor_manual WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+}));
+
 /* ---------- rekening ---------- */
 const withSisa = (r) => ({ ...r, sisa: r.pagu - r.realisasi, capaian: r.pagu ? (r.realisasi / r.pagu) * 100 : 0 });
 
@@ -422,6 +498,14 @@ function parseIndukFromKode(kode, indukKodeIn, indukUraianIn, noUrutIn) {
   const iu = indukUraianIn || INDUK_MAP[ik] || 'Belanja BLUD';
   const nu = Number(noUrutIn) || (parts.length >= 7 ? parseInt(parts[6], 10) || 0 : 0);
   return { ik, iu, nu };
+}
+
+// Tahun RAB untuk data baru: dari input, atau tahun anggaran aktif di pengaturan
+async function tahunRab(tahun) {
+  const n = Number(tahun);
+  if (n >= 2000 && n <= 2100) return n;
+  const s = await getSettings();
+  return Number(s.tahun) || new Date().getFullYear();
 }
 
 app.get('/api/rekening', wrap(async (req, res) => {
@@ -442,10 +526,12 @@ app.get('/api/rekening', wrap(async (req, res) => {
     }
   }
 
-  const trxFilter = tahun && tahun !== 'semua' ? `AND SUBSTR(COALESCE(t.sp_tanggal, t.tanggal),1,4) = ${db.pool.escape(tahun)}` : '';
+  if (tahun && tahun !== 'semua') { w.push('r.tahun = ?'); p.push(Number(tahun)); }
+
+  // Satu baris rekening = satu tahun anggaran, jadi realisasi = semua transaksi yang menunjuk baris ini
   const sql = `
     SELECT r.*,
-      r.realisasi_awal + COALESCE((SELECT SUM(kotor) FROM transaksi t WHERE t.rekening_id=r.id ${trxFilter}), 0) AS realisasi
+      r.realisasi_awal + COALESCE((SELECT SUM(kotor) FROM transaksi t WHERE t.rekening_id=r.id), 0) AS realisasi
     FROM rekening r
     WHERE ${w.join(' AND ')}
     ORDER BY r.induk_kode, r.no_urut, r.kode
@@ -455,16 +541,37 @@ app.get('/api/rekening', wrap(async (req, res) => {
 }));
 
 app.post('/api/rekening', adminOrPep, wrap(async (req, res) => {
-  const { kode, uraian, pagu = 0, induk_kode, induk_uraian, no_urut, ppkom_id, pptk_id, pengadaan_id } = req.body;
+  const { kode, uraian, pagu = 0, induk_kode, induk_uraian, no_urut, ppkom_id, pptk_id, pengadaan_id, tahun } = req.body;
   if (!kode || !uraian) return res.status(400).json({ error: 'Kode & uraian wajib' });
+  const th = await tahunRab(tahun);
   const { ik, iu, nu } = parseIndukFromKode(kode, induk_kode, induk_uraian, no_urut);
   try {
-    const r = await db.prepare('INSERT INTO rekening(kode,induk_kode,induk_uraian,no_urut,uraian,pagu,ppkom_id,pptk_id,pengadaan_id) VALUES(?,?,?,?,?,?,?,?,?)')
-      .run(kode.trim(), ik, iu, nu, uraian.trim(), +pagu, ppkom_id || null, pptk_id || null, pengadaan_id || null);
+    const r = await db.prepare('INSERT INTO rekening(tahun,kode,induk_kode,induk_uraian,no_urut,uraian,pagu,ppkom_id,pptk_id,pengadaan_id) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(th, kode.trim(), ik, iu, nu, uraian.trim(), +pagu, ppkom_id || null, pptk_id || null, pengadaan_id || null);
     res.json({ id: Number(r.lastInsertRowid) });
   } catch {
-    res.status(400).json({ error: 'Kode rekening sudah ada' });
+    res.status(400).json({ error: `Kode rekening sudah ada di tahun ${th}` });
   }
+}));
+
+// Salin RAB satu tahun ke tahun lain (kode, uraian, pagu, pejabat); realisasi awal dikosongkan, kode yang sudah ada dilewati
+app.post('/api/rekening/salin', adminOrPep, wrap(async (req, res) => {
+  const dari = Number(req.body?.dari);
+  const ke = Number(req.body?.ke);
+  if (!dari || !ke || dari === ke) return res.status(400).json({ error: 'Pilih tahun asal dan tahun tujuan yang berbeda' });
+  const r = await db.prepare(`
+    INSERT IGNORE INTO rekening(tahun,kode,induk_kode,induk_uraian,no_urut,uraian,pagu,realisasi_awal,ppkom_id,pptk_id,pengadaan_id)
+    SELECT ?,kode,induk_kode,induk_uraian,no_urut,uraian,pagu,0,ppkom_id,pptk_id,pengadaan_id FROM rekening WHERE tahun=?
+  `).run(ke, dari);
+  res.json({ disalin: r.changes });
+}));
+
+// Daftar tahun RAB: yang sudah ada + tahun berjalan + tahun depan
+app.get('/api/rekening/tahun', wrap(async (req, res) => {
+  const rows = await db.prepare('SELECT DISTINCT tahun FROM rekening WHERE tahun>0').all();
+  const sekarang = new Date().getFullYear();
+  const set = new Set([sekarang, sekarang + 1, ...rows.map((r) => Number(r.tahun))]);
+  res.json([...set].sort((a, b) => b - a).map(String));
 }));
 app.put('/api/rekening/:id', adminOrPep, wrap(async (req, res) => {
   const { kode, uraian, pagu, realisasi_awal, induk_kode, induk_uraian, no_urut, ppkom_id, pptk_id, pengadaan_id } = req.body;
@@ -474,7 +581,7 @@ app.put('/api/rekening/:id', adminOrPep, wrap(async (req, res) => {
       .run(kode, ik, iu, nu, uraian, +pagu || 0, +realisasi_awal || 0, ppkom_id || null, pptk_id || null, pengadaan_id || null, req.params.id);
     res.json({ ok: true });
   } catch {
-    res.status(400).json({ error: 'Kode rekening sudah ada' });
+    res.status(400).json({ error: 'Kode rekening sudah ada di tahun ini' });
   }
 }));
 app.delete('/api/rekening/:id', adminOrPep, wrap(async (req, res) => {
@@ -498,7 +605,7 @@ app.get('/api/import/template', wrap(async (req, res) => {
 app.post('/api/import/sheets', adminOrPep, upload.single('file'), wrap(async (req, res) => res.json(await listSheets(req.file.buffer))));
 app.post('/api/import/realisasi', adminOrPep, upload.single('file'), wrap(async (req, res) => {
   try {
-    res.json(await importRealisasi(req.file.buffer, req.body.sheet));
+    res.json(await importRealisasi(req.file.buffer, req.body.sheet, await tahunRab(req.body.tahun)));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -529,16 +636,17 @@ const aksesTrx = (tulis) => wrap(async (req, res, next) => {
 });
 
 /* Nomor urut dokumen tidak boleh kembar dalam satu tahun (hanya diperiksa bila nilainya berubah). */
-const KOLOM_NOMOR = { hps_no_urut: 'HPS', sp_no_urut: 'Surat Pesanan', bast_no_urut: 'BAST', spk_no_urut: 'SPK' };
+const KOLOM_NOMOR = { hps_no_urut: 'HPS', bakn_no_urut: 'BA Klarifikasi & Negosiasi', sp_no_urut: 'Surat Pesanan', bast_no_urut: 'BAST', spk_no_urut: 'SPK' };
 async function cekNomorBentrok(b, idSendiri) {
   const tahun = String(b.sp_tanggal || b.tanggal || '').slice(0, 4);
   if (!tahun) return;
-  const lama = idSendiri ? await db.prepare('SELECT hps_no_urut, sp_no_urut, bast_no_urut, spk_no_urut FROM transaksi WHERE id=?').get(idSendiri) : null;
+  const lama = idSendiri ? await db.prepare('SELECT hps_no_urut, bakn_no_urut, sp_no_urut, bast_no_urut, spk_no_urut FROM transaksi WHERE id=?').get(idSendiri) : null;
   for (const [kol, label] of Object.entries(KOLOM_NOMOR)) {
     const v = String(b[kol] || '').trim();
     if (!v || (lama && String(lama[kol] || '').trim() === v)) continue;
     const dup = await db.prepare(`SELECT id FROM transaksi WHERE ${kol}=? AND id<>? AND SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=? LIMIT 1`).get(v, idSendiri || 0, tahun);
     if (dup) throw new Error(`Nomor ${label} ${v} sudah dipakai transaksi lain tahun ${tahun}. Muat ulang halaman untuk mendapat nomor berikutnya.`);
+    if ((await nomorManualSet(tahun)).has(v.toLowerCase())) throw new Error(`Nomor ${label} ${v} sudah dicatat manual di Monitoring Nomor tahun ${tahun}. Pilih nomor lain atau hapus catatannya.`);
   }
 }
 
@@ -791,17 +899,17 @@ app.get('/api/dashboard', wrap(async (req, res) => {
   }
   const whereClause = wTrx.length ? 'WHERE ' + wTrx.join(' AND ') : '';
 
-  const tot = await db.prepare(`SELECT COALESCE(SUM(pagu),0) pagu, COALESCE(SUM(realisasi_awal),0) awal FROM rekening`).get();
+  const thRab = tahun && tahun !== 'semua' ? Number(tahun) : null;
+  const tot = await db.prepare(`SELECT COALESCE(SUM(pagu),0) pagu, COALESCE(SUM(realisasi_awal),0) awal FROM rekening ${thRab ? 'WHERE tahun=?' : ''}`).get(...(thRab ? [thRab] : []));
   const trx = await db.prepare(`SELECT COALESCE(SUM(t.kotor),0) s, COUNT(*) c FROM transaksi t ${whereClause}`).get(...pTrx);
   const perKategori = await db.prepare(`SELECT t.kategori, COUNT(*) AS jumlah, SUM(t.kotor) AS total FROM transaksi t ${whereClause} GROUP BY t.kategori`).all(...pTrx);
   const perTahap = await db.prepare(`SELECT COALESCE(t.tahap,"pesanan") AS tahap, COUNT(*) AS jumlah, SUM(t.kotor) AS total FROM transaksi t ${whereClause} GROUP BY COALESCE(t.tahap,"pesanan")`).all(...pTrx);
   const perBulan = (await db.prepare(`SELECT SUBSTR(COALESCE(t.sp_tanggal, t.tanggal),1,7) AS bulan, COUNT(*) AS jumlah, SUM(t.kotor) AS total FROM transaksi t ${whereClause} GROUP BY SUBSTR(COALESCE(t.sp_tanggal, t.tanggal),1,7) ORDER BY bulan DESC LIMIT 12`).all(...pTrx)).reverse();
 
-  const trxFilterRek = tahun && tahun !== 'semua' ? `AND SUBSTR(COALESCE(t.sp_tanggal, t.tanggal),1,4) = ${db.pool.escape(tahun)}` : '';
   const allRek = (await db.prepare(`
-    SELECT r.*, r.realisasi_awal + COALESCE((SELECT SUM(kotor) FROM transaksi t WHERE t.rekening_id=r.id ${trxFilterRek}),0) AS realisasi
-    FROM rekening r
-  `).all()).map(withSisa);
+    SELECT r.*, r.realisasi_awal + COALESCE((SELECT SUM(kotor) FROM transaksi t WHERE t.rekening_id=r.id),0) AS realisasi
+    FROM rekening r ${thRab ? 'WHERE r.tahun=?' : ''}
+  `).all(...(thRab ? [thRab] : []))).map(withSisa);
   const top = [...allRek].filter((r) => r.pagu > 0).sort((a, b) => b.capaian - a.capaian).slice(0, 8);
 
   // Ringkasan per Kode Rekening Induk
@@ -827,7 +935,7 @@ app.get('/api/dashboard', wrap(async (req, res) => {
   res.json({
     tahun,
     pagu: Number(tot.pagu),
-    realisasi: Number(tot.awal) + Number(trx.s),
+    realisasi: allRek.reduce((s, r) => s + (Number(r.realisasi) || 0), 0),
     transaksi: Number(trx.c),
     penyedia: Number(penyediaCount),
     perKategori,

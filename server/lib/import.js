@@ -23,7 +23,7 @@ async function listSheets(buffer) {
   return wb.worksheets.map((w) => w.name);
 }
 
-async function importRealisasi(buffer, sheetName) {
+async function importRealisasi(buffer, sheetName, tahun = new Date().getFullYear()) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
   let ws = sheetName && wb.getWorksheet(sheetName);
@@ -76,8 +76,8 @@ async function importRealisasi(buffer, sheetName) {
     return Number(res.lastInsertRowid);
   };
 
-  const upsertSql = `INSERT INTO rekening(kode,induk_kode,induk_uraian,no_urut,uraian,pagu,realisasi_awal,ppkom_id,pptk_id,pengadaan_id)
-    VALUES(?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE
+  const upsertSql = `INSERT INTO rekening(tahun,kode,induk_kode,induk_uraian,no_urut,uraian,pagu,realisasi_awal,ppkom_id,pptk_id,pengadaan_id)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE
     induk_kode=VALUES(induk_kode),induk_uraian=VALUES(induk_uraian),no_urut=VALUES(no_urut),
     uraian=VALUES(uraian),pagu=VALUES(pagu),realisasi_awal=VALUES(realisasi_awal),
     ppkom_id=COALESCE(VALUES(ppkom_id),ppkom_id),pptk_id=COALESCE(VALUES(pptk_id),pptk_id),pengadaan_id=COALESCE(VALUES(pengadaan_id),pengadaan_id)`;
@@ -104,7 +104,7 @@ async function importRealisasi(buffer, sheetName) {
         const pptkId = col.pptk ? await pej(str(row.getCell(col.pptk)), 'PPTK') : null;
         const pengadaanId = col.pengadaan ? await pej(str(row.getCell(col.pengadaan)), 'PENGADAAN') : null;
         await conn.query(upsertSql, [
-          kode, prefix, indukUraian, noUrut,
+          tahun, kode, prefix, indukUraian, noUrut,
           str(row.getCell(col.uraian)), Math.round(num(row.getCell(col.pagu))),
           col.real ? Math.round(num(row.getCell(col.real))) : 0,
           ppkomId, pptkId, pengadaanId
@@ -130,7 +130,7 @@ async function importRealisasi(buffer, sheetName) {
           const pptkId = col.pptk ? await pej(str(row.getCell(col.pptk)), 'PPTK') : null;
           const pengadaanId = col.pengadaan ? await pej(str(row.getCell(col.pengadaan)), 'PENGADAAN') : null;
           await conn.query(upsertSql, [
-            rawKode, ik, iu, noUrut,
+            tahun, rawKode, ik, iu, noUrut,
             str(row.getCell(col.uraian)), Math.round(num(row.getCell(col.pagu))),
             col.real ? Math.round(num(row.getCell(col.real))) : 0,
             ppkomId, pptkId, pengadaanId
@@ -146,7 +146,7 @@ async function importRealisasi(buffer, sheetName) {
   } finally {
     conn.release();
   }
-  return { sheet: ws.name, rekening: jumlah };
+  return { sheet: ws.name, rekening: jumlah, tahun };
 }
 
 /**
@@ -158,7 +158,9 @@ async function generateTemplateExcel(tahun = '2026') {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'AdminProc RSUD dr. Soeratno Gemolong';
 
-  const rekRows = await db.prepare('SELECT * FROM rekening ORDER BY induk_kode, no_urut, kode').all();
+  // baris tahun tsb; bila belum ada, pakai RAB tahun terakhir sebelumnya sebagai dasar
+  const thAcuan = (await db.prepare('SELECT MAX(tahun) AS t FROM rekening WHERE tahun<=?').get(Number(tahun)))?.t || (await db.prepare('SELECT MAX(tahun) AS t FROM rekening').get())?.t || 0;
+  const rekRows = await db.prepare('SELECT * FROM rekening WHERE tahun=? ORDER BY induk_kode, no_urut, kode').all(thAcuan);
   const pejRows = await db.prepare('SELECT * FROM pejabat WHERE aktif=1 ORDER BY peran, nama').all();
   const pejMap = new Map(pejRows.map((p) => [p.id, p.nama]));
 

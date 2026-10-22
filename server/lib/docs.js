@@ -1516,7 +1516,7 @@ function getSpektekData(d) {
     paket_pengadaan: namaPaket,
     id_rup: spk.id_rup || '-',
     tanggal: spk.tanggal || d.t.hps_tanggal || d.t.sp_tanggal || d.t.tanggal,
-    fungsi_umum: spk.fungsi_umum || `Pengadaan ${namaPaket} ini berfungsi sebagai perangkat/sarana pendukung operasional untuk menunjang pelayanan dan administrasi di RSUD dr. Soeratno Gemolong. Output yang diharapkan dari pengadaan ini adalah peningkatan efisiensi layanan, kelancaran operasional, serta terjaminnya mutu pelayanan rumah sakit.`,
+    fungsi_umum: spk.fungsi_umum || `Pengadaan ${namaPaket.replace(/^pengadaan\s+/i, '')} ini berfungsi sebagai perangkat/sarana pendukung operasional untuk menunjang pelayanan dan administrasi di RSUD dr. Soeratno Gemolong. Output yang diharapkan dari pengadaan ini adalah peningkatan efisiensi layanan, kelancaran operasional, serta terjaminnya mutu pelayanan rumah sakit.`,
     mutu_merek: spk.mutu_merek || 'Mengacu pada merek pabrikan resmi yang terdaftar pada sistem E-Katalog LKPP / standar kualitas resmi.',
     mutu_standarisasi: spk.mutu_standarisasi || 'Barang 100% baru (brand new), asli (original), bukan rekondisi, dan memiliki garansi resmi pabrikan/distributor minimal 1 (satu) tahun.',
     mutu_teknis: spk.mutu_teknis || (d.items || []).map((it) => `${it.jenis_barang} (${it.kuantitas} ${it.satuan || 'Unit'})`).join('\n') || '-',
@@ -2370,8 +2370,8 @@ const LABEL_DOK_50_750 = {
   bahpl: '9. BAHPL',
   pengumuman_pl: '10. PENGUMUMAN HASIL PL',
   laporan_pl: '11. LAPORAN HASIL PL KE PPK',
-  sppbj: '12. SPPBJ',
-  spk: '13. SPK',
+  spk: '12. SPK',
+  sppbj: '13. SPPBJ',
   bast: '14. BAST',
   baphp: '15. BAPHP',
   a2: '16. A2',
@@ -2457,5 +2457,5 @@ async function buatDokumen(id, jenis, format) {
   return { buffer, filename: nama + '.' + format, mime: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
 }
 
-module.exports = { buatDokumen, ambilData };
+module.exports = { buatDokumen, ambilData, getSpektekData };
 

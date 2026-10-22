@@ -263,6 +263,17 @@ async function migrateSchema() {
   await addColIfMissing('rekening', 'induk_uraian', "VARCHAR(255) DEFAULT ''");
   await addColIfMissing('rekening', 'no_urut', 'INT DEFAULT 0');
 
+  // RAB per tahun anggaran: baris lama diberi tahun dari pengaturan; kode unik per (tahun, kode)
+  await addColIfMissing('rekening', 'tahun', 'SMALLINT NOT NULL DEFAULT 0');
+  const [setTh] = await pool.query(`SELECT v FROM pengaturan WHERE k='tahun'`);
+  await pool.query(`UPDATE rekening SET tahun=? WHERE tahun=0`, [Number(setTh[0]?.v) || new Date().getFullYear()]);
+  const [idxRek] = await pool.query(
+    `SELECT DISTINCT INDEX_NAME AS n FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rekening' AND INDEX_NAME IN ('kode','uq_rek_tahun_kode')`
+  );
+  const adaIdx = new Set(idxRek.map((r) => r.n));
+  if (!adaIdx.has('uq_rek_tahun_kode')) await pool.query(`ALTER TABLE rekening ADD UNIQUE KEY uq_rek_tahun_kode (tahun, kode)`);
+  if (adaIdx.has('kode')) await pool.query(`ALTER TABLE rekening DROP INDEX kode`);
+
   const [rekRows] = await pool.query(`SELECT id, kode, induk_kode, induk_uraian, no_urut FROM rekening`);
   for (const r of rekRows) {
     const parts = String(r.kode || '').split('.');
@@ -328,6 +339,20 @@ async function migrateSchema() {
   `);
   await addColIfMissing('transaksi_item', 'harga_hps', 'BIGINT DEFAULT 0');
   await addColIfMissing('transaksi_item', 'harga_penawaran', 'BIGINT DEFAULT 0');
+
+  // 7. Nomor surat yang dicatat/dicadangkan manual (menu Monitoring Nomor)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS nomor_manual (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      tahun SMALLINT NOT NULL,
+      no_urut VARCHAR(50) NOT NULL,
+      perihal VARCHAR(255) NOT NULL DEFAULT '',
+      tanggal DATE NULL,
+      keterangan VARCHAR(500) NOT NULL DEFAULT '',
+      dibuat_oleh INT NULL,
+      UNIQUE KEY uq_nomor_manual (tahun, no_urut)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 
   // Peringatan: akun aktif yang masih memakai password umum
   const [semuaUser] = await pool.query(`SELECT username, password_hash FROM users WHERE aktif=1`);

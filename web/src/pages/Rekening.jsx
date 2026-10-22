@@ -28,8 +28,8 @@ function ImportModal({ open, onClose, onDone, tahun }) {
   }
   const go = async () => {
     setBusy(true); setMsg('')
-    const fd = new FormData(); fd.append('file', file); fd.append('sheet', sheet)
-    try { const r = await api('/import/realisasi', { method: 'POST', form: fd }); setMsg(`Berhasil: ${r.rekening} kode rekening dari sheet “${r.sheet}”.`); onDone() }
+    const fd = new FormData(); fd.append('file', file); fd.append('sheet', sheet); fd.append('tahun', tahunTarget)
+    try { const r = await api('/import/realisasi', { method: 'POST', form: fd }); setMsg(`Berhasil: ${r.rekening} kode rekening dari sheet “${r.sheet}” masuk ke RAB tahun ${r.tahun}.`); onDone(r.tahun) }
     catch (e) { setMsg(e.message) } finally { setBusy(false) }
   }
   const sheetOptions = [
@@ -62,7 +62,7 @@ function ImportModal({ open, onClose, onDone, tahun }) {
         </div>
 
         <div className="space-y-3 pt-1">
-          <div className="text-xs font-extrabold uppercase tracking-wider text-[#122922]">2. Unggah File Excel Template / Realisasi BLUD</div>
+          <div className="text-xs font-extrabold uppercase tracking-wider text-[#122922]">2. Unggah File Excel — data masuk ke RAB tahun {tahunTarget}</div>
           <input type="file" accept=".xlsx" onChange={(e) => pick(e.target.files[0])} className="input" />
           {sheets.length > 0 && (
             <Field label="Sheet sumber">
@@ -72,6 +72,36 @@ function ImportModal({ open, onClose, onDone, tahun }) {
           {msg && <p className="rounded-xl border border-[#122922]/20 bg-[#f7f5ef] px-3.5 py-2.5 text-sm font-semibold text-[#122922]">{msg}</p>}
           <button className="btn-primary w-full" disabled={!file || busy} onClick={go}><Upload size={15} />{busy ? 'Mengimpor…' : 'Impor Data Kode Rekening & Pejabat'}</button>
         </div>
+      </div>
+    </Modal>
+  )
+}
+
+function SalinModal({ open, onClose, tahunList, ke, onDone }) {
+  const [dari, setDari] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const asal = tahunList.filter((t) => t !== ke)
+  useEffect(() => { if (open) { setDari(asal[0] || ''); setMsg('') } }, [open, ke])
+  const go = async () => {
+    setBusy(true); setMsg('')
+    try {
+      const r = await api('/rekening/salin', { method: 'POST', body: { dari, ke } })
+      setMsg(`${r.disalin} kode rekening disalin ke RAB ${ke}. Kode yang sudah ada dilewati.`)
+      onDone()
+    } catch (e) { setMsg(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <Modal open={open} onClose={onClose} title={`Salin RAB ke Tahun ${ke}`}>
+      <div className="space-y-3.5">
+        <p className="text-xs text-[#122922]/75">
+          Kode rekening, uraian, pagu, dan pejabat pengampu disalin dari tahun asal. <b>Realisasi awal dikosongkan.</b> Setelah itu ubah pagu atau kode yang berbeda pada tahun {ke}.
+        </p>
+        <Field label="Salin dari tahun">
+          <SearchableSelect value={dari} options={asal.map((t) => ({ value: t, label: `RAB ${t}` }))} onChange={setDari} placeholder="— pilih tahun asal —" />
+        </Field>
+        {msg && <p className="rounded-xl border border-[#122922]/20 bg-[#f7f5ef] px-3.5 py-2.5 text-sm font-semibold text-[#122922]">{msg}</p>}
+        <button className="btn-primary w-full" disabled={!dari || busy} onClick={go}>{busy ? 'Menyalin…' : `Salin ke RAB ${ke}`}</button>
       </div>
     </Modal>
   )
@@ -178,7 +208,7 @@ function RekModal({ rek, pejabat, onClose, onSaved }) {
 }
 
 export default function Rekening() {
-  const { user, tahun } = useAuth()
+  const { user, tahun: tahunGlobal } = useAuth()
   const canManage = user?.role === 'admin' || user?.role === 'pep' || user?.role === 'superuser' || !!user?.is_super
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
@@ -188,6 +218,13 @@ export default function Rekening() {
   const [pejabat, setPejabat] = useState([])
   const [edit, setEdit] = useState(null)
   const [imp, setImp] = useState(false)
+  const [salin, setSalin] = useState(false)
+  // RAB dikelola per tahun anggaran; awalnya mengikuti tahun global
+  const [thRab, setThRab] = useState(tahunGlobal && tahunGlobal !== 'semua' ? tahunGlobal : String(new Date().getFullYear()))
+  const [tahunOpts, setTahunOpts] = useState([thRab])
+  const tahun = thRab
+  const muatTahun = () => api('/rekening/tahun').then(setTahunOpts)
+  useEffect(() => { muatTahun() }, [])
 
   // Jika login sebagai pejabat pengadaan, default tampilkan semua di menu Kode Rekening tapi sediakan tombol filter "Hanya yang Saya Ampu"
   const load = useCallback(() => {
@@ -270,6 +307,9 @@ export default function Rekening() {
             {hanyaDiampu ? 'Menampilkan yang Saya Ampu' : 'Filter: Hanya yang Saya Ampu'}
           </button>
         )}
+        <select className="input !w-auto !py-2 font-mono text-sm font-extrabold" value={thRab} onChange={(e) => setThRab(e.target.value)} title="Tahun anggaran RAB">
+          {tahunOpts.map((t) => <option key={t} value={t}>RAB {t}</option>)}
+        </select>
         {canManage && (
           <>
             <a
@@ -282,9 +322,12 @@ export default function Rekening() {
             <button className="btn-ghost" onClick={() => setImp(true)}>
               <Upload size={15} /> Impor Excel (PEP)
             </button>
+            <button className="btn-ghost" onClick={() => setSalin(true)} title="Salin kode rekening dari tahun lain">
+              <FolderTree size={15} /> Salin dari Tahun Lain
+            </button>
             <button
               className="btn-lime"
-              onClick={() => setEdit({ induk_kode: '5.1.02.99.99.9999', induk_uraian: 'Belanja Barang dan Jasa BLUD', no_urut: 1, kode: '5.1.02.99.99.9999.01', uraian: '', pagu: 0, realisasi_awal: 0 })}
+              onClick={() => setEdit({ tahun: thRab, induk_kode: '5.1.02.99.99.9999', induk_uraian: 'Belanja Barang dan Jasa BLUD', no_urut: 1, kode: '5.1.02.99.99.9999.01', uraian: '', pagu: 0, realisasi_awal: 0 })}
             >
               <Plus size={16} strokeWidth={2.5} /> Tambah Rekening
             </button>
@@ -464,7 +507,8 @@ export default function Rekening() {
         )}
       </div>
 
-      <ImportModal open={imp} onClose={() => setImp(false)} onDone={load} tahun={tahun} />
+      <ImportModal open={imp} onClose={() => setImp(false)} onDone={(th) => { if (th) setThRab(String(th)); muatTahun(); load() }} tahun={tahun} />
+      <SalinModal open={salin} onClose={() => setSalin(false)} tahunList={tahunOpts} ke={thRab} onDone={() => { muatTahun(); load() }} />
       {edit && <RekModal rek={edit} pejabat={pejabat} onClose={() => setEdit(null)} onSaved={load} />}
     </>
   )

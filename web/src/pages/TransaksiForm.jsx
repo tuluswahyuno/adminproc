@@ -30,7 +30,7 @@ const CONTOH_ITEMS_50_750 = [
   { jenis_barang: 'AC Floor Standing 5 PK Daikin FVRN125BXV14', satuan: 'Unit', kuantitas: 2, harga_hps: 31850000, harga_penawaran: 31500000, harga_satuan: 31250000 },
 ]
 
-const defaultPl = (tahun = '2026') => ({
+export const defaultPl = (tahun = '2026') => ({
   undangan_no_urut: '',
   undangan_nomor: '',
   undangan_tanggal: hariIni(),
@@ -103,9 +103,9 @@ const defaultSpektek = (namaRek = 'Belanja Modal Peralatan Komputer', items = []
   }
 }
 
-const itemBaru = () => ({ jenis_barang: '', satuan: 'Unit', kuantitas: 1, harga_hps: '', harga_penawaran: '', harga_satuan: '' })
+export const itemBaru = () => ({ jenis_barang: '', satuan: 'Unit', kuantitas: 1, harga_hps: '', harga_penawaran: '', harga_satuan: '' })
 
-const kosong = () => ({
+export const kosong = () => ({
   tahap: 'pesanan',
   mode_pengadaan: '0_10',
   tanggal: hariIni(),
@@ -158,7 +158,7 @@ const kosong = () => ({
   items: [itemBaru()],
 })
 
-function RekeningPicker({ value, onPick, user, tahun }) {
+export function RekeningPicker({ value, onPick, user, tahun }) {
   const [q, setQ] = useState('')
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
@@ -386,6 +386,10 @@ export default function TransaksiForm() {
   const { user } = useAuth()
 
   const initMode = searchParams.get('mode')
+  useEffect(() => {
+    if (id || !['10_50', '50_750', 'spektek', 'hps', 'negosiasi', 'undangan', 'evaluasi', 'penetapan', 'kontrak'].includes(initMode)) return
+    nav(`/pengadaan/baru?tier=${['10_50', 'spektek', 'hps', 'negosiasi'].includes(initMode) ? '10_50' : '50_750'}`, { replace: true })
+  }, [id, initMode, nav])
   const [step, setStep] = useState(() => {
     if (initMode === '50_750') return 10
     if (initMode === 'undangan') return 20
@@ -582,6 +586,7 @@ export default function TransaksiForm() {
       const baphpNomor = t.baphp_nomor || (baphpUrut ? `000.3.2/${baphpUrut}/05.1.2/${nomor.tahun}` : '')
       const defaultPengurusId = t.pengurus_barang_id || s.pengurus_barang_id || pList.find((x) => x.peran === 'PENGURUS_BARANG' && x.aktif)?.id || ''
 
+      if (['10_50', '50_750'].includes(t.mode_pengadaan)) { nav(`/pengadaan/${id}`, { replace: true }); return }
       setF({
         ...kosong(),
         ...t,

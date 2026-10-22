@@ -232,7 +232,7 @@ export default function Dashboard() {
                             </span>
                           ) : (
                             <Link
-                              to={`/transaksi/${t.id}?mode=terima`}
+                              to={['10_50', '50_750'].includes(t.mode_pengadaan) ? `/pengadaan/${t.id}` : `/transaksi/${t.id}?mode=terima`}
                               className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] hover:bg-[#c8e220]"
                             >
                               <Clock size={10} /> Barang Diterima → Buat BAST

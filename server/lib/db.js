@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
+const { passwordAcak } = require('./util');
 
 const envPath = path.join(__dirname, '..', '.env');
 if (fs.existsSync(envPath)) {
@@ -62,6 +63,31 @@ const db = {
     },
   }),
 };
+
+// Jalankan beberapa query dalam satu transaksi; q punya get/all/run seperti db.
+async function tx(fn) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const q = {
+      get: async (sql, params = []) => (await conn.query(sql, params))[0][0] || null,
+      all: async (sql, params = []) => (await conn.query(sql, params))[0],
+      run: async (sql, params = []) => {
+        const [result] = await conn.query(sql, params);
+        return { lastInsertRowid: result.insertId, changes: result.affectedRows };
+      },
+    };
+    const out = await fn(q);
+    await conn.commit();
+    return out;
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+db.tx = tx;
 
 async function getSettings() {
   const [rows] = await pool.query('SELECT k, v FROM pengaturan');
@@ -186,28 +212,26 @@ async function migrateSchema() {
   const bcrypt = require('bcryptjs');
   const [tulusPej] = await pool.query(`SELECT id FROM pejabat WHERE peran='PENGADAAN' AND LOWER(nama) LIKE '%tulus wahyuno%' LIMIT 1`);
   const tulusPejId = tulusPej[0]?.id || 21;
-  const [uRows] = await pool.query(`SELECT id FROM users WHERE username='tulus'`);
-  if (uRows.length === 0) {
+  // Password awal: dari env SEED_PASSWORD, atau acak dan dicetak sekali di console.
+  const akunBaru = [];
+  const buatUserAwal = async (username, nama, role, pejabatId) => {
+    const [ada] = await pool.query(`SELECT id FROM users WHERE username=?`, [username]);
+    if (ada.length) return false;
+    const pw = process.env.SEED_PASSWORD || passwordAcak();
     await pool.query(
-      `INSERT INTO users(username, nama, password_hash, role, aktif, pejabat_id) VALUES('tulus', 'Tulus Wahyuno, A.Md', ?, 'pejabat_pengadaan', 1, ?)`,
-      [bcrypt.hashSync('123456', 10), tulusPejId]
+      `INSERT INTO users(username, nama, password_hash, role, aktif, pejabat_id) VALUES(?,?,?,?,1,?)`,
+      [username, nama, bcrypt.hashSync(pw, 10), role, pejabatId]
     );
-  } else {
+    akunBaru.push(`${username} / ${pw}`);
+    return true;
+  };
+  if (!(await buatUserAwal('tulus', 'Tulus Wahyuno, A.Md', 'pejabat_pengadaan', tulusPejId))) {
     await pool.query(`UPDATE users SET pejabat_id=?, nama='Tulus Wahyuno, A.Md' WHERE username='tulus'`, [tulusPejId]);
   }
-  const [suRows] = await pool.query(`SELECT id FROM users WHERE username='superuser'`);
-  if (suRows.length === 0) {
-    await pool.query(
-      `INSERT INTO users(username, nama, password_hash, role, aktif, pejabat_id) VALUES('superuser', 'Super User (Penguji Sistem)', ?, 'superuser', 1, NULL)`,
-      [bcrypt.hashSync('123456', 10)]
-    );
-  }
-  const [pepRows] = await pool.query(`SELECT id FROM users WHERE username='pep'`);
-  if (pepRows.length === 0) {
-    await pool.query(
-      `INSERT INTO users(username, nama, password_hash, role, aktif, pejabat_id) VALUES('pep', 'Tim PEP (Perencanaan & Evaluasi)', ?, 'pep', 1, NULL)`,
-      [bcrypt.hashSync('123456', 10)]
-    );
+  await buatUserAwal('superuser', 'Super User (Penguji Sistem)', 'superuser', null);
+  await buatUserAwal('pep', 'Tim PEP (Perencanaan & Evaluasi)', 'pep', null);
+  if (akunBaru.length) {
+    console.log(`[SEED] Akun awal dibuat (catat, lalu ganti password lewat menu Password):\n  ${akunBaru.join('\n  ')}`);
   }
 
   // 3. Create penyedia table & add npwp
@@ -304,6 +328,15 @@ async function migrateSchema() {
   `);
   await addColIfMissing('transaksi_item', 'harga_hps', 'BIGINT DEFAULT 0');
   await addColIfMissing('transaksi_item', 'harga_penawaran', 'BIGINT DEFAULT 0');
+
+  // Peringatan: akun aktif yang masih memakai password umum
+  const [semuaUser] = await pool.query(`SELECT username, password_hash FROM users WHERE aktif=1`);
+  const lemah = semuaUser
+    .filter((u) => ['123456', 'admin123', 'admin'].some((pw) => bcrypt.compareSync(pw, u.password_hash)))
+    .map((u) => u.username);
+  if (lemah.length) {
+    console.warn(`[PERINGATAN] Akun masih memakai password umum, segera ganti: ${lemah.join(', ')}`);
+  }
 }
 
 module.exports = { db, pool, getSettings, migrateSchema, DB_CONFIG, INDUK_MAP };

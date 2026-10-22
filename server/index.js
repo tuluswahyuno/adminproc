@@ -5,7 +5,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { db, getSettings, migrateSchema, INDUK_MAP } = require('./lib/db');
-const { kategori, KATEGORI, hitungPajak } = require('./lib/util');
+const { kategori, KATEGORI, hitungPajak, passwordAcak } = require('./lib/util');
 const { buatDokumen } = require('./lib/docs');
 const { importRealisasi, listSheets, generateTemplateExcel } = require('./lib/import');
 
@@ -26,13 +26,44 @@ const sign = (p) => {
   return b + '.' + crypto.createHmac('sha256', SECRET).update(b).digest('base64url');
 };
 function verify(tok) {
-  if (!tok) return null;
+  if (!tok || typeof tok !== 'string') return null;
   const [b, s] = tok.split('.');
-  const ok = s && crypto.timingSafeEqual(Buffer.from(s), Buffer.from(crypto.createHmac('sha256', SECRET).update(b).digest('base64url')));
-  if (!ok) return null;
-  const p = JSON.parse(Buffer.from(b, 'base64url').toString());
-  return p.exp > Date.now() ? p : null;
+  if (!b || !s) return null;
+  const a = Buffer.from(s);
+  const e = Buffer.from(crypto.createHmac('sha256', SECRET).update(b).digest('base64url'));
+  if (a.length !== e.length || !crypto.timingSafeEqual(a, e)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(b, 'base64url').toString());
+    return p.exp > Date.now() ? p : null;
+  } catch {
+    return null;
+  }
 }
+const SESI_DETIK = 12 * 3600;
+const setSid = (req, res, tok, maxAge = SESI_DETIK) => {
+  const aman = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `sid=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${aman ? '; Secure' : ''}`);
+};
+
+/* ---------- batas percobaan login (per IP + username, di memori) ---------- */
+const LOGIN_MAKS_GAGAL = 8;
+const LOGIN_JENDELA_MS = 15 * 60e3;
+const gagalLogin = new Map();
+const kunciLogin = (req, username) => `${req.ip}|${String(username || '').toLowerCase()}`;
+const loginTerkunci = (k) => {
+  const g = gagalLogin.get(k);
+  if (!g) return false;
+  if (Date.now() - g.sejak > LOGIN_JENDELA_MS) { gagalLogin.delete(k); return false; }
+  return g.n >= LOGIN_MAKS_GAGAL;
+};
+const catatGagalLogin = (k) => {
+  const g = gagalLogin.get(k);
+  if (!g || Date.now() - g.sejak > LOGIN_JENDELA_MS) gagalLogin.set(k, { n: 1, sejak: Date.now() });
+  else g.n += 1;
+};
+setInterval(() => {
+  for (const [k, g] of gagalLogin) if (Date.now() - g.sejak > LOGIN_JENDELA_MS) gagalLogin.delete(k);
+}, LOGIN_JENDELA_MS).unref();
 const cookie = (req, n) => (req.headers.cookie || '').split(';').map((c) => c.trim().split('=')).find(([k]) => k === n)?.[1];
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch((e) => {
   console.error(e);
@@ -49,8 +80,12 @@ async function auth(req, res, next) {
       WHERE u.id=? AND u.aktif=1
     `).get(p.id);
     if (!u) return res.status(401).json({ error: 'Belum masuk' });
-    u.is_super = !!(p.super_id || u.role === 'superuser' || u.role === 'admin');
-    u.super_id = p.super_id || (u.is_super ? u.id : null);
+    // Hanya akun 'superuser' yang boleh pindah user/role; token lama dengan super_id dicek ulang ke DB.
+    const superAsli = p.super_id
+      ? await db.prepare(`SELECT id FROM users WHERE id=? AND role='superuser' AND aktif=1`).get(p.super_id)
+      : null;
+    u.is_super = !!superAsli || u.role === 'superuser';
+    u.super_id = superAsli ? superAsli.id : (u.is_super ? u.id : null);
     if (p.act_role && u.is_super) u.role = p.act_role;
     req.user = u;
     next();
@@ -64,20 +99,26 @@ const validRole = (r) => (['admin', 'superuser', 'pep', 'staf', 'pejabat_pengada
 
 app.post('/api/login', wrap(async (req, res) => {
   const { username, password } = req.body || {};
+  const kunci = kunciLogin(req, username);
+  if (loginTerkunci(kunci)) return res.status(429).json({ error: 'Terlalu banyak percobaan gagal. Coba lagi dalam 15 menit.' });
   const u = await db.prepare(`
     SELECT u.*, p.peran AS pejabat_peran
     FROM users u
     LEFT JOIN pejabat p ON p.id = u.pejabat_id
     WHERE u.username=? AND u.aktif=1
   `).get(String(username || ''));
-  if (!u || !bcrypt.compareSync(String(password || ''), u.password_hash)) return res.status(401).json({ error: 'Username atau password salah' });
-  const isSuper = u.role === 'superuser' || u.role === 'admin';
-  const tok = sign({ id: u.id, super_id: isSuper ? u.id : null, exp: Date.now() + 12 * 3600e3 });
-  res.setHeader('Set-Cookie', `sid=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${12 * 3600}`);
+  if (!u || !bcrypt.compareSync(String(password || ''), u.password_hash)) {
+    catatGagalLogin(kunci);
+    return res.status(401).json({ error: 'Username atau password salah' });
+  }
+  gagalLogin.delete(kunci);
+  const isSuper = u.role === 'superuser';
+  const tok = sign({ id: u.id, super_id: isSuper ? u.id : null, exp: Date.now() + SESI_DETIK * 1e3 });
+  setSid(req, res, tok);
   res.json({ id: u.id, username: u.username, nama: u.nama, role: u.role, pejabat_id: u.pejabat_id, pejabat_peran: u.pejabat_peran, is_super: isSuper, super_id: isSuper ? u.id : null });
 }));
 app.post('/api/logout', (req, res) => {
-  res.setHeader('Set-Cookie', 'sid=; HttpOnly; Path=/; Max-Age=0');
+  setSid(req, res, '', 0);
   res.json({ ok: true });
 });
 
@@ -111,13 +152,15 @@ app.post('/api/superuser/switch', wrap(async (req, res) => {
     if (!ex) {
       const uname = p.nama.split(',')[0].replace(/^(dr\.|drg\.|ir\.|h\.|hj\.)\s*/i, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '') || `pejabat.${p.id}`;
       const defRole = p.peran === 'PENGADAAN' ? 'pejabat_pengadaan' : p.peran === 'KPA' ? 'admin' : 'staf';
+      // Akun ini hanya untuk disamar oleh super user; password acak, admin bisa mengaturnya di menu Pengguna.
+      const hashAcak = bcrypt.hashSync(passwordAcak(16), 10);
       try {
         const ins = await db.prepare('INSERT INTO users(username,nama,password_hash,role,pejabat_id,aktif) VALUES(?,?,?,?,?,1)')
-          .run(uname, p.nama, bcrypt.hashSync('123456', 10), defRole, p.id);
+          .run(uname, p.nama, hashAcak, defRole, p.id);
         targetUserId = Number(ins.lastInsertRowid);
       } catch {
         const ins = await db.prepare('INSERT INTO users(username,nama,password_hash,role,pejabat_id,aktif) VALUES(?,?,?,?,?,1)')
-          .run(`${uname}.${p.id}`, p.nama, bcrypt.hashSync('123456', 10), defRole, p.id);
+          .run(`${uname}.${p.id}`, p.nama, hashAcak, defRole, p.id);
         targetUserId = Number(ins.lastInsertRowid);
       }
     } else {
@@ -130,9 +173,9 @@ app.post('/api/superuser/switch', wrap(async (req, res) => {
     id: targetUserId,
     super_id: superId,
     act_role: act_role || null,
-    exp: Date.now() + 12 * 3600e3,
+    exp: Date.now() + SESI_DETIK * 1e3,
   });
-  res.setHeader('Set-Cookie', `sid=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${12 * 3600}`);
+  setSid(req, res, tok);
   const u = await db.prepare(`
     SELECT u.id, u.username, u.nama, u.role, u.pejabat_id, p.peran AS pejabat_peran
     FROM users u
@@ -240,13 +283,13 @@ app.get('/api/pejabat', wrap(async (req, res) => {
   const rows = await db.prepare('SELECT * FROM pejabat ORDER BY peran, nama').all();
   res.json(rows);
 }));
-app.post('/api/pejabat', wrap(async (req, res) => {
+app.post('/api/pejabat', adminOrPep, wrap(async (req, res) => {
   const { nama, nip = '', peran, jabatan = '', alamat = '' } = req.body;
   if (!nama || !peran) return res.status(400).json({ error: 'Nama & peran wajib' });
   const r = await db.prepare('INSERT INTO pejabat(nama,nip,peran,jabatan,alamat) VALUES(?,?,?,?,?)').run(nama, nip, peran, jabatan, alamat);
   res.json({ id: Number(r.lastInsertRowid) });
 }));
-app.put('/api/pejabat/:id', wrap(async (req, res) => {
+app.put('/api/pejabat/:id', adminOrPep, wrap(async (req, res) => {
   const { nama, nip = '', peran, jabatan = '', alamat = '', aktif = 1 } = req.body;
   await db.prepare('UPDATE pejabat SET nama=?,nip=?,peran=?,jabatan=?,alamat=?,aktif=? WHERE id=?')
     .run(nama, nip, peran, jabatan, alamat, aktif ? 1 : 0, req.params.id);
@@ -280,7 +323,7 @@ app.put('/api/penyedia/:id', wrap(async (req, res) => {
     .run(nama, pimpinan, jabatan, alamat, npwp, aktif ? 1 : 0, req.params.id);
   res.json({ ok: true });
 }));
-app.delete('/api/penyedia/:id', wrap(async (req, res) => {
+app.delete('/api/penyedia/:id', adminOrPep, wrap(async (req, res) => {
   await db.prepare('DELETE FROM penyedia WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 }));
@@ -289,36 +332,55 @@ app.delete('/api/penyedia/:id', wrap(async (req, res) => {
 app.get('/api/penomoran/next', wrap(async (req, res) => {
   const s = await getSettings();
   const tahun = req.query.tahun || s.tahun || String(new Date().getFullYear());
-  const rows = await db.prepare('SELECT hps_no_urut, bakn_no_urut, sp_no_urut, bast_no_urut, spk_no_urut FROM transaksi WHERE SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=?').all(tahun);
-  let maxHps = 1285;
-  let maxSp = 1606;
-  let maxBast = 1630;
-  let maxUndangan = 2435;
-  let maxPembukaan = 2572;
-  let maxPenetapan = 2655;
-  let maxSppbj = 1768;
-  let maxSpk = 2672;
+  const rows = await db.prepare('SELECT hps_no_urut, sp_no_urut, bast_no_urut, spk_no_urut, pl_json FROM transaksi WHERE SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=?').all(tahun);
+  // Nomor terakhir tiap buku register; dipakai bila belum ada data di tahun tsb.
+  const maks = { hps: 1285, sp: 1606, bast: 1630, undangan: 2435, pembukaan: 2572, klarifikasi: 2577, penetapan: 2655, laporan: 2656, sppbj: 1768, spk: 2672 };
+  // '2573.b' -> 2573
+  const naik = (k, v) => {
+    const n = parseInt(v, 10);
+    if (!Number.isNaN(n) && n > maks[k]) maks[k] = n;
+  };
   for (const r of rows) {
-    const nHps = parseInt(r.hps_no_urut, 10);
-    if (!Number.isNaN(nHps) && nHps > maxHps) maxHps = nHps;
-    const nSp = parseInt(r.sp_no_urut, 10);
-    if (!Number.isNaN(nSp) && nSp > maxSp) maxSp = nSp;
-    const nBast = parseInt(r.bast_no_urut, 10);
-    if (!Number.isNaN(nBast) && nBast > maxBast) maxBast = nBast;
-    const nSpk = parseInt(r.spk_no_urut, 10);
-    if (!Number.isNaN(nSpk) && nSpk > maxSpk) maxSpk = nSpk;
+    naik('hps', r.hps_no_urut);
+    naik('sp', r.sp_no_urut);
+    naik('bast', r.bast_no_urut);
+    naik('spk', r.spk_no_urut);
+    let pl = {};
+    if (r.pl_json) {
+      try { pl = JSON.parse(r.pl_json) || {}; } catch { pl = {}; }
+    }
+    naik('undangan', pl.undangan_no_urut);
+    naik('pembukaan', pl.pembukaan_no_urut);
+    naik('pembukaan', pl.evaluasi_no_urut);
+    naik('klarifikasi', pl.undangan_klarifikasi_no_urut);
+    // penetapan, BAHPL, pengumuman & laporan memakai satu deret nomor
+    naik('penetapan', pl.penetapan_no_urut);
+    naik('penetapan', pl.bahpl_no_urut);
+    naik('penetapan', pl.pengumuman_no_urut);
+    naik('penetapan', pl.laporan_no_urut);
+    naik('laporan', pl.laporan_no_urut);
+    naik('sppbj', pl.sppbj_no_urut);
+    naik('spk', pl.spk_no_urut);
   }
-  const nextHps = String(maxHps + 1);
-  const nextSp = String(maxSp + 1);
+  const nextHps = String(maks.hps + 1);
+  const nextSp = String(maks.sp + 1);
   const nextBakn = `${nextSp}.a`;
-  const nextBast = String(maxBast + 1);
+  const nextBast = String(maks.bast + 1);
   const nextBaphp = `${nextBast}.a`;
-  const nextUndanganPl = String(maxUndangan + 1);
-  const nextPembukaan = String(maxPembukaan + 1);
-  const nextPenetapan = String(maxPenetapan + 1);
-  const nextSppbj = String(maxSppbj + 1);
-  const nextSpk = String(maxSpk + 1);
+  const nextUndanganPl = String(maks.undangan + 1);
+  const nextPembukaan = String(maks.pembukaan + 1);
+  const nextPenetapan = String(maks.penetapan + 1);
+  const nextPlLaporan = String(Math.max(maks.laporan + 1, maks.penetapan + 2));
+  const nextPlUndanganKlarifikasi = `${Math.max(maks.klarifikasi + 1, maks.pembukaan + 6)}.a`;
+  const nextSppbj = String(maks.sppbj + 1);
+  const nextSpk = String(maks.spk + 1);
   res.json({
+    // nama yang dibaca TransaksiForm.jsx
+    nextPlUndangan: nextUndanganPl,
+    nextPlEvaluasi: nextPembukaan,
+    nextPlUndanganKlarifikasi,
+    nextPlPenetapan: nextPenetapan,
+    nextPlLaporan,
     tahun,
     prefix: '000.3.2',
     kodeBagian: '05.1.2',
@@ -340,11 +402,11 @@ app.get('/api/penomoran/next', wrap(async (req, res) => {
     formatUndanganPl: `000.3.2/${nextUndanganPl}/05.1.2/${tahun}`,
     formatPembukaan: `000.3.2/${nextPembukaan}.b/05.1.2/${tahun}`,
     formatEvaluasi: `000.3.2/${nextPembukaan}.c/05.1.2/${tahun}`,
-    formatUndKlarifikasi: `000.3.2/${parseInt(nextPembukaan, 10) + 5}.a/05.1.2/${tahun}`,
+    formatUndKlarifikasi: `000.3.2/${nextPlUndanganKlarifikasi}/05.1.2/${tahun}`,
     formatPenetapan: `000.3.2/${nextPenetapan}/05.1.2/${tahun}`,
     formatBahpl: `000.3.2/${nextPenetapan}.a/05.1.2/${tahun}`,
     formatPengumuman: `000.3.2/${nextPenetapan}.b/05.1.2/${tahun}`,
-    formatLaporan: `000.3.2/${parseInt(nextPenetapan, 10) + 1}/05.1.2/${tahun}`,
+    formatLaporan: `000.3.2/${nextPlLaporan}/05.1.2/${tahun}`,
     formatSppbj: `000.3.2/${nextSppbj}/05.1.2/${tahun}`,
     formatSpk: `000.3.2/${nextSpk}/05.1.2/${tahun}`,
     formatSpkLampiran: `000.3.2/${nextSpk}.a/05.1.2/${tahun}`,
@@ -447,6 +509,39 @@ const TRX_SQL = `SELECT t.*, r.kode AS rek_kode, r.uraian AS rek_uraian, r.induk
   (SELECT COUNT(*) FROM transaksi_item ti WHERE ti.transaksi_id=t.id) AS jml_item
   FROM transaksi t JOIN rekening r ON r.id=t.rekening_id LEFT JOIN users u ON u.id=t.dibuat_oleh`;
 
+/* admin/superuser/pep: bebas. Role lain: hanya transaksi buatan sendiri atau yang diampunya (PP/PPK/PPTK).
+   Untuk membaca, pembatasan hanya berlaku bagi pejabat_pengadaan (sama dengan daftar transaksi). */
+const aksesTrx = (tulis) => wrap(async (req, res, next) => {
+  const t = await db.prepare(`
+    SELECT t.dibuat_oleh, t.pengadaan_id, t.ppkom_id, t.pptk_id,
+           r.pengadaan_id AS r_pengadaan, r.ppkom_id AS r_ppkom, r.pptk_id AS r_pptk
+    FROM transaksi t LEFT JOIN rekening r ON r.id=t.rekening_id WHERE t.id=?
+  `).get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Tidak ditemukan' });
+  const { role, id: uid, pejabat_id: pid } = req.user;
+  if (['admin', 'superuser', 'pep'].includes(role)) return next();
+  if (!tulis && role !== 'pejabat_pengadaan') return next();
+  const pejabatSaya = pid ? Number(pid) : null;
+  const milikSaya = Number(t.dibuat_oleh) === Number(uid)
+    || (pejabatSaya && [t.pengadaan_id, t.ppkom_id, t.pptk_id, t.r_pengadaan, t.r_ppkom, t.r_pptk].some((v) => Number(v) === pejabatSaya));
+  if (!milikSaya) return res.status(403).json({ error: 'Transaksi ini bukan milik/diampu akun Anda' });
+  next();
+});
+
+/* Nomor urut dokumen tidak boleh kembar dalam satu tahun (hanya diperiksa bila nilainya berubah). */
+const KOLOM_NOMOR = { hps_no_urut: 'HPS', sp_no_urut: 'Surat Pesanan', bast_no_urut: 'BAST', spk_no_urut: 'SPK' };
+async function cekNomorBentrok(b, idSendiri) {
+  const tahun = String(b.sp_tanggal || b.tanggal || '').slice(0, 4);
+  if (!tahun) return;
+  const lama = idSendiri ? await db.prepare('SELECT hps_no_urut, sp_no_urut, bast_no_urut, spk_no_urut FROM transaksi WHERE id=?').get(idSendiri) : null;
+  for (const [kol, label] of Object.entries(KOLOM_NOMOR)) {
+    const v = String(b[kol] || '').trim();
+    if (!v || (lama && String(lama[kol] || '').trim() === v)) continue;
+    const dup = await db.prepare(`SELECT id FROM transaksi WHERE ${kol}=? AND id<>? AND SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=? LIMIT 1`).get(v, idSendiri || 0, tahun);
+    if (dup) throw new Error(`Nomor ${label} ${v} sudah dipakai transaksi lain tahun ${tahun}. Muat ulang halaman untuk mendapat nomor berikutnya.`);
+  }
+}
+
 app.get('/api/transaksi', wrap(async (req, res) => {
   const { q = '', rekening_id, induk_kode, tahap, bulan, tahun, kategori: kat } = req.query;
   const w = [], p = [];
@@ -475,7 +570,7 @@ app.get('/api/transaksi', wrap(async (req, res) => {
   res.json(rows.map((t) => ({ ...t, ...hitungPajak({ kotor: t.kotor, ppn: !!t.ppn_aktif, pph: !!t.pph_aktif, ppnTarif: t.ppn_tarif, pphTarif: t.pph_tarif }) })));
 }));
 
-app.get('/api/transaksi/:id', wrap(async (req, res) => {
+app.get('/api/transaksi/:id', aksesTrx(false), wrap(async (req, res) => {
   const t = await db.prepare(`${TRX_SQL} WHERE t.id=?`).get(req.params.id);
   if (!t) return res.status(404).json({ error: 'Tidak ditemukan' });
   const items = await db.prepare('SELECT * FROM transaksi_item WHERE transaksi_id=? ORDER BY urut, id').all(req.params.id);
@@ -571,8 +666,8 @@ function bacaTrx(b, user, tahunDefault) {
   };
 }
 
-async function simpanItemsDanPenyedia(trxId, b, items) {
-  await db.prepare('DELETE FROM transaksi_item WHERE transaksi_id=?').run(trxId);
+async function simpanItemsDanPenyedia(q, trxId, b, items) {
+  await q.run('DELETE FROM transaksi_item WHERE transaksi_id=?', [trxId]);
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const qty = Number(it.kuantitas) || 1;
@@ -580,19 +675,20 @@ async function simpanItemsDanPenyedia(trxId, b, items) {
     const hHps = Math.round(Number(it.harga_hps) || hs);
     const hPen = Math.round(Number(it.harga_penawaran) || 0);
     const ht = Math.round(qty * hs);
-    await db.prepare(
-      'INSERT INTO transaksi_item(transaksi_id,urut,jenis_barang,satuan,kuantitas,harga_hps,harga_penawaran,harga_satuan,harga_total) VALUES(?,?,?,?,?,?,?,?,?)'
-    ).run(trxId, i + 1, String(it.jenis_barang).trim(), String(it.satuan || 'Unit').trim(), qty, hHps, hPen, hs, ht);
+    await q.run(
+      'INSERT INTO transaksi_item(transaksi_id,urut,jenis_barang,satuan,kuantitas,harga_hps,harga_penawaran,harga_satuan,harga_total) VALUES(?,?,?,?,?,?,?,?,?)',
+      [trxId, i + 1, String(it.jenis_barang).trim(), String(it.satuan || 'Unit').trim(), qty, hHps, hPen, hs, ht]
+    );
   }
   const namaP = String(b.penyedia || '').trim().split('\n')[0].trim();
   if (namaP && namaP !== '-') {
-    const ex = await db.prepare('SELECT id FROM penyedia WHERE lower(nama)=lower(?)').get(namaP);
+    const ex = await q.get('SELECT id FROM penyedia WHERE lower(nama)=lower(?)', [namaP]);
     if (!ex) {
-      await db.prepare('INSERT INTO penyedia(nama,pimpinan,jabatan,alamat,npwp) VALUES(?,?,?,?,?)')
-        .run(namaP, String(b.penyedia_pimpinan || '').trim(), String(b.penyedia_jabatan || 'Direktur').trim(), String(b.penyedia_alamat || '').trim(), String(b.penyedia_npwp || '').trim());
+      await q.run('INSERT INTO penyedia(nama,pimpinan,jabatan,alamat,npwp) VALUES(?,?,?,?,?)',
+        [namaP, String(b.penyedia_pimpinan || '').trim(), String(b.penyedia_jabatan || 'Direktur').trim(), String(b.penyedia_alamat || '').trim(), String(b.penyedia_npwp || '').trim()]);
     } else if (b.penyedia_pimpinan || b.penyedia_alamat || b.penyedia_npwp) {
-      await db.prepare('UPDATE penyedia SET pimpinan=COALESCE(NULLIF(?,""),pimpinan), jabatan=COALESCE(NULLIF(?,""),jabatan), alamat=COALESCE(NULLIF(?,""),alamat), npwp=COALESCE(NULLIF(?,""),npwp) WHERE id=?')
-        .run(String(b.penyedia_pimpinan || '').trim(), String(b.penyedia_jabatan || '').trim(), String(b.penyedia_alamat || '').trim(), String(b.penyedia_npwp || '').trim(), ex.id);
+      await q.run('UPDATE penyedia SET pimpinan=COALESCE(NULLIF(?,""),pimpinan), jabatan=COALESCE(NULLIF(?,""),jabatan), alamat=COALESCE(NULLIF(?,""),alamat), npwp=COALESCE(NULLIF(?,""),npwp) WHERE id=?',
+        [String(b.penyedia_pimpinan || '').trim(), String(b.penyedia_jabatan || '').trim(), String(b.penyedia_alamat || '').trim(), String(b.penyedia_npwp || '').trim(), ex.id]);
     }
   }
 }
@@ -601,58 +697,67 @@ app.post('/api/transaksi', wrap(async (req, res) => {
   try {
     const s = await getSettings();
     const { fields, items } = bacaTrx(req.body, req.user, s.tahun);
-    const r = await db.prepare(`INSERT INTO transaksi(
-      tanggal,rekening_id,penyedia,uraian,kotor,ppn_aktif,pph_aktif,ppn_tarif,pph_tarif,kategori,status,tahap,mode_pengadaan,
-      kpa_id,ppkom_id,pptk_id,pengadaan_id,bendahara_id,verifikator_id,pengurus_barang_id,
-      spektek_json,
-      hps_no_urut,hps_nomor,hps_tanggal,hps_total,
-      bakn_no_urut,bakn_nomor,bakn_tanggal,penawaran_total,bakn_hasil_teknis,
-      sp_no_urut,sp_nomor,sp_tanggal,sp_tgl_kirim,
-      bast_no_urut,bast_nomor,bast_tanggal,
-      baphp_no_urut,baphp_nomor,baphp_tanggal,
-      pl_json,spk_no_urut,spk_nomor,spk_tanggal,
-      penyedia_id,penyedia_pimpinan,penyedia_jabatan,penyedia_alamat,penyedia_npwp,
-      ppk_jabatan,ppk_alamat,dibuat_oleh
-    ) VALUES(${'?,'.repeat(51)}?)`).run(...fields, req.user.id);
-    const trxId = Number(r.lastInsertRowid);
-    await simpanItemsDanPenyedia(trxId, req.body, items);
+    await cekNomorBentrok(req.body, null);
+    const trxId = await db.tx(async (q) => {
+      const r = await q.run(`INSERT INTO transaksi(
+        tanggal,rekening_id,penyedia,uraian,kotor,ppn_aktif,pph_aktif,ppn_tarif,pph_tarif,kategori,status,tahap,mode_pengadaan,
+        kpa_id,ppkom_id,pptk_id,pengadaan_id,bendahara_id,verifikator_id,pengurus_barang_id,
+        spektek_json,
+        hps_no_urut,hps_nomor,hps_tanggal,hps_total,
+        bakn_no_urut,bakn_nomor,bakn_tanggal,penawaran_total,bakn_hasil_teknis,
+        sp_no_urut,sp_nomor,sp_tanggal,sp_tgl_kirim,
+        bast_no_urut,bast_nomor,bast_tanggal,
+        baphp_no_urut,baphp_nomor,baphp_tanggal,
+        pl_json,spk_no_urut,spk_nomor,spk_tanggal,
+        penyedia_id,penyedia_pimpinan,penyedia_jabatan,penyedia_alamat,penyedia_npwp,
+        ppk_jabatan,ppk_alamat,dibuat_oleh
+      ) VALUES(${'?,'.repeat(51)}?)`, [...fields, req.user.id]);
+      const id = Number(r.lastInsertRowid);
+      await simpanItemsDanPenyedia(q, id, req.body, items);
+      return id;
+    });
     res.json({ id: trxId });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 }));
 
-app.put('/api/transaksi/:id', wrap(async (req, res) => {
+app.put('/api/transaksi/:id', aksesTrx(true), wrap(async (req, res) => {
   try {
     const s = await getSettings();
     const { fields, items } = bacaTrx(req.body, req.user, s.tahun);
-    await db.prepare(`UPDATE transaksi SET
-      tanggal=?,rekening_id=?,penyedia=?,uraian=?,kotor=?,ppn_aktif=?,pph_aktif=?,ppn_tarif=?,pph_tarif=?,kategori=?,status=?,tahap=?,mode_pengadaan=?,
-      kpa_id=?,ppkom_id=?,pptk_id=?,pengadaan_id=?,bendahara_id=?,verifikator_id=?,pengurus_barang_id=?,
-      spektek_json=?,
-      hps_no_urut=?,hps_nomor=?,hps_tanggal=?,hps_total=?,
-      bakn_no_urut=?,bakn_nomor=?,bakn_tanggal=?,penawaran_total=?,bakn_hasil_teknis=?,
-      sp_no_urut=?,sp_nomor=?,sp_tanggal=?,sp_tgl_kirim=?,
-      bast_no_urut=?,bast_nomor=?,bast_tanggal=?,
-      baphp_no_urut=?,baphp_nomor=?,baphp_tanggal=?,
-      pl_json=?,spk_no_urut=?,spk_nomor=?,spk_tanggal=?,
-      penyedia_id=?,penyedia_pimpinan=?,penyedia_jabatan=?,penyedia_alamat=?,penyedia_npwp=?,
-      ppk_jabatan=?,ppk_alamat=?
-      WHERE id=?`).run(...fields, req.params.id);
-    await simpanItemsDanPenyedia(Number(req.params.id), req.body, items);
+    await cekNomorBentrok(req.body, Number(req.params.id));
+    await db.tx(async (q) => {
+      await q.run(`UPDATE transaksi SET
+        tanggal=?,rekening_id=?,penyedia=?,uraian=?,kotor=?,ppn_aktif=?,pph_aktif=?,ppn_tarif=?,pph_tarif=?,kategori=?,status=?,tahap=?,mode_pengadaan=?,
+        kpa_id=?,ppkom_id=?,pptk_id=?,pengadaan_id=?,bendahara_id=?,verifikator_id=?,pengurus_barang_id=?,
+        spektek_json=?,
+        hps_no_urut=?,hps_nomor=?,hps_tanggal=?,hps_total=?,
+        bakn_no_urut=?,bakn_nomor=?,bakn_tanggal=?,penawaran_total=?,bakn_hasil_teknis=?,
+        sp_no_urut=?,sp_nomor=?,sp_tanggal=?,sp_tgl_kirim=?,
+        bast_no_urut=?,bast_nomor=?,bast_tanggal=?,
+        baphp_no_urut=?,baphp_nomor=?,baphp_tanggal=?,
+        pl_json=?,spk_no_urut=?,spk_nomor=?,spk_tanggal=?,
+        penyedia_id=?,penyedia_pimpinan=?,penyedia_jabatan=?,penyedia_alamat=?,penyedia_npwp=?,
+        ppk_jabatan=?,ppk_alamat=?
+        WHERE id=?`, [...fields, req.params.id]);
+      await simpanItemsDanPenyedia(q, Number(req.params.id), req.body, items);
+    });
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 }));
 
-app.delete('/api/transaksi/:id', wrap(async (req, res) => {
-  await db.prepare('DELETE FROM transaksi_item WHERE transaksi_id=?').run(req.params.id);
-  await db.prepare('DELETE FROM transaksi WHERE id=?').run(req.params.id);
+app.delete('/api/transaksi/:id', aksesTrx(true), wrap(async (req, res) => {
+  await db.tx(async (q) => {
+    await q.run('DELETE FROM transaksi_item WHERE transaksi_id=?', [req.params.id]);
+    await q.run('DELETE FROM transaksi WHERE id=?', [req.params.id]);
+  });
   res.json({ ok: true });
 }));
 
-app.get('/api/transaksi/:id/dokumen/:jenis.:format', wrap(async (req, res) => {
+app.get('/api/transaksi/:id/dokumen/:jenis.:format', aksesTrx(false), wrap(async (req, res) => {
   const { jenis, format } = req.params;
   const validJenis = [
     'spektek', 'hps', 'bakn', 'sp', 'bast', 'baphp', 'a2', 'verifikasi',

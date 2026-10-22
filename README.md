@@ -11,12 +11,16 @@ Aplikasi web untuk membuat dokumen **A2 (Surat Bukti Pengeluaran, A5)** dan **Le
 - Verifikator/KPA/Bendahara dikelola di Pengaturan; setiap SPJ menyimpan pejabat saat dibuat (aman jika verifikator berganti tahun depan).
 - Peringatan jika melebihi sisa pagu.
 
-## Menjalankan (butuh Node.js 22.5+)
+## Menjalankan (butuh Node.js 22+ dan MySQL)
 ```bash
 npm run install:all          # sekali saja
 npm start                    # build web + jalankan server di http://localhost:3001
 ```
-Login awal: `admin` / `admin123` — **segera ganti** lewat tombol Password.
+Database baru: impor dulu `database/dbper21102026.sql` ke MySQL, lalu salin `server/.env.example` menjadi `server/.env`.
+
+Akun awal (`tulus`, `superuser`, `pep`) dibuat otomatis bila belum ada, dengan password acak yang dicetak **sekali** di console server (atau isi env `SEED_PASSWORD`). Akun dari file SQL memakai password lama — server memberi peringatan di console bila ada akun yang masih memakai password umum; **segera ganti** lewat tombol Password.
+
+`server/data/secret.key` (kunci tanda tangan sesi) dibuat otomatis, tidak di-commit. Di produksi, isi env `APP_SECRET`.
 
 Mode pengembangan: `npm run dev:server` dan `npm run dev:web` (http://localhost:5173).
 

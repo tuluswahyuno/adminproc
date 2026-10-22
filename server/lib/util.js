@@ -1,4 +1,8 @@
 // Utilitas: terbilang, pajak, kategori nilai, format.
+const crypto = require('crypto');
+
+const passwordAcak = (n = 12) => crypto.randomBytes(n).toString('base64url').slice(0, n);
+
 const SATUAN = ['', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan', 'Sepuluh', 'Sebelas'];
 
 function baca(n) {
@@ -72,5 +76,5 @@ function tglKalimatBast(iso) {
   };
 }
 
-module.exports = { terbilang, baca, rupiah, hitungPajak, kategori, KATEGORI, tglIndo, tglKalimatBast };
+module.exports = { passwordAcak, terbilang, baca, rupiah, hitungPajak, kategori, KATEGORI, tglIndo, tglKalimatBast };
 

@@ -17,6 +17,7 @@ dist/
 *.db
 server/data/*.sqlite*
 server/data/*.db*
+server/data/*.key
 *.log
 npm-debug.log*
 

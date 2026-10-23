@@ -79,7 +79,7 @@ export default function Penyedia() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="tabel-kartu w-full">
             <thead className="border-b border-[#122922]/12 bg-[#f7f5ef]/40">
               <tr>
                 <th className="th">Nama CV / Penyedia</th>
@@ -110,7 +110,7 @@ export default function Penyedia() {
                     </div>
                     <div className="text-xs text-[#122922]/60">{v.jabatan || 'Direktur'}</div>
                   </td>
-                  <td className="td">
+                  <td className="td" data-label="NPWP">
                     {v.npwp ? (
                       <span className="inline-flex items-center gap-1 rounded-lg border border-[#122922]/20 bg-[#f7f5ef] px-2.5 py-1 font-mono text-xs font-bold text-[#122922]">
                         <FileBadge size={12} className="text-[#3f8f77]" />

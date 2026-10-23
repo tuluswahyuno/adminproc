@@ -6,6 +6,7 @@ import {
 import { api, hitungPajak, kategoriOf, num, persen, rp, terbilang, PERAN } from '../lib'
 import { Field, KategoriBadge, PageHeader, Progress, SearchableSelect, konfirmasiHapus } from '../ui'
 import { CetakMenu, PreviewModal, filterDokByTahap } from './Transaksi'
+import { useKonflikNomor } from '../nomorCek'
 import { RekeningPicker, defaultPl, itemBaru, kosong } from './TransaksiForm'
 import { useAuth } from '../App'
 
@@ -121,7 +122,7 @@ const KAK = [
 ]
 
 /* ---------- komponen kecil ---------- */
-function NomorField({ k, f, tahun, nn, setNo }) {
+function NomorField({ k, f, tahun, nn, setNo, konflik }) {
   const urut = nomorDari(f, k)
   const saran = saranNomor(k, f, nn)
   const sudahIsi = useRef(false)
@@ -133,11 +134,16 @@ function NomorField({ k, f, tahun, nn, setNo }) {
   const ubah = (v) => { setAsal('manual'); setNo(k, v) }
   return (
     <Field label={NOMOR[k].label}>
-      <div className="flex items-stretch overflow-hidden rounded-xl border border-[#122922]/20 bg-white focus-within:border-[#122922]">
+      <div className={`flex items-stretch overflow-hidden rounded-xl border bg-white ${konflik ? 'border-rose-500 ring-2 ring-rose-200' : 'border-[#122922]/20 focus-within:border-[#122922]'}`}>
         <span className="grid place-items-center bg-[#f7f5ef] px-2.5 font-mono text-[11px] font-bold text-[#122922]/60">000.3.2/</span>
         <input className="w-24 min-w-0 flex-1 bg-transparent px-2 py-2 font-mono text-sm font-extrabold outline-none" value={urut} onChange={(e) => ubah(e.target.value.trim())} />
         <span className="grid place-items-center bg-[#f7f5ef] px-2.5 font-mono text-[11px] font-bold text-[#122922]/60">/05.1.2/{tahun}</span>
       </div>
+      {konflik && (
+        <p className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold leading-snug text-rose-700">
+          <AlertTriangle size={13} className="mt-px shrink-0" /> <span>{konflik}{saran && saran !== urut ? ` Saran: ${saran}.` : ''}</span>
+        </p>
+      )}
       <div className="mt-1 flex items-center gap-2 text-[11px]">
         <span className={`rounded-full px-2 py-0.5 font-bold ${asal === 'otomatis' ? 'bg-[#b5e8a5]' : asal === 'manual' ? 'bg-[#f6db5b]' : 'bg-[#f7f5ef] text-[#122922]/70'}`}>
           {asal === 'otomatis' ? 'Otomatis' : asal === 'manual' ? 'Manual' : 'Tersimpan'}
@@ -505,6 +511,17 @@ export default function PengadaanWizard() {
     bakn: ['bakn'], penetapan: ['penetapan', 'bahpl', 'pengumuman', 'laporan'], spk: ['spk'], sppbj: ['sppbj'], sp: ['sp'], serah: ['bast', 'baphp'], terima: ['bast', 'baphp'], bayar: [],
   }
 
+  /* ----- nomor kembar: diperiksa langsung ke server; simpan / lanjut diblokir ----- */
+  const entriNomor = Object.keys(NOMOR).flatMap((k) => {
+    const alurPl = tier === '50_750'
+    if ((NOMOR[k].pl || k === 'spk') ? !alurPl : (k === 'sp' && alurPl)) return []
+    const u = nomorDari(f, k)
+    if (!u || !((nomorLangkah[L?.id] || []).includes(k) || nomorDari(snap || {}, k))) return []
+    return [{ kunci: k, label: NOMOR[k].label.replace('No. ', ''), no_urut: u }]
+  })
+  const konflikNomor = useKonflikNomor(tahun, saved, entriNomor)
+  const adaKembar = Object.keys(konflikNomor).filter((k) => entriNomor.some((e) => e.kunci === k))
+
   /* ----- peringatan urutan tanggal (50–750) ----- */
   const peringatanTanggal = useMemo(() => {
     if (tier !== '50_750' || !L) return ''
@@ -534,6 +551,7 @@ export default function PengadaanWizard() {
   const validasi = () => {
     if (!f.rekening_id) return 'Pilih kode rekening dulu (kartu "Kode rekening & paket pekerjaan" di bagian atas).'
     if (!f.tanggal) return 'Tanggal paket wajib diisi.'
+    if (adaKembar.length) return `Ada nomor surat kembar: ${adaKembar.map((k) => NOMOR[k].label.replace('No. ', '')).join(', ')}. ${konflikNomor[adaKembar[0]]}`
     if (pejabatKurang.length) return `Kode rekening ini belum memiliki ${pejabatKurang.join(', ')}. Lengkapi dulu di menu Kode Rekening.`
     const id = L.id
     const rank = Math.max(TAHAP_RANK[L.tahap] ?? 0, TAHAP_RANK[f.tahap] ?? 0)
@@ -663,7 +681,7 @@ export default function PengadaanWizard() {
     <div className="grid gap-4 sm:grid-cols-2">
       {kunci.map((k) => (
         <div key={k} className="contents">
-          <NomorField k={k} f={f} tahun={tahun} nn={nn} setNo={setNo} />
+          <NomorField k={k} f={f} tahun={tahun} nn={nn} setNo={setNo} konflik={konflikNomor[k]} />
           <TanggalField label={`Tanggal ${NOMOR[k].label.replace('No. ', '')}`} value={tanggalDari(f, k)} onChange={(v) => setTgl(k, v)} />
         </div>
       ))}
@@ -1116,7 +1134,7 @@ function Baris({ l, v, biasa, bahaya }) {
   return (
     <div className="flex justify-between gap-3">
       <dt className="shrink-0 font-medium text-[#122922]/60">{l}</dt>
-      <dd className={`text-right font-bold break-words ${biasa ? '' : 'font-mono'} ${bahaya ? 'text-rose-600' : 'text-[#122922]'}`}>{v}</dd>
+      <dd className={`min-w-0 text-right font-bold [overflow-wrap:anywhere] ${biasa ? '' : 'font-mono'} ${bahaya ? 'text-rose-600' : 'text-[#122922]'}`}>{v}</dd>
     </div>
   )
 }

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowDownToLine, ArrowUpToLine, Hash, Pencil, Plus, Search, Trash2, TriangleAlert } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpToLine, CalendarDays, Hash, Pencil, Plus, Search, Trash2, TriangleAlert, X } from 'lucide-react'
 import { api, tgl } from '../lib'
 import { Empty, Field, Modal, PageHeader, SearchableSelect, konfirmasiHapus } from '../ui'
 import { useAuth } from '../App'
+import { useKonflikNomor } from '../nomorCek'
 
 const angkaDari = (urut) => {
   const n = parseInt(urut, 10)
@@ -15,8 +16,10 @@ function NomorModal({ data, tahun, onClose, onSaved }) {
   const [f, setF] = useState(data)
   const [err, setErr] = useState('')
   const u = (k, v) => setF((x) => ({ ...x, [k]: v }))
+  const konflik = useKonflikNomor(tahun, null, f.no_urut ? [{ kunci: 'no', label: 'Nomor ini', no_urut: f.no_urut }] : [], f.id)
   const simpan = async (e) => {
     e.preventDefault()
+    if (konflik.no) { setErr(konflik.no); return }
     try {
       const body = { ...f, tahun }
       f.id ? await api('/nomor/' + f.id, { method: 'PUT', body }) : await api('/nomor', { method: 'POST', body })
@@ -28,7 +31,8 @@ function NomorModal({ data, tahun, onClose, onSaved }) {
     <Modal open onClose={onClose} title={f.id ? 'Ubah Catatan Nomor' : 'Catat Nomor Surat'}>
       <form onSubmit={simpan} className="space-y-3.5">
         <Field label="Nomor urut" hint="Angka, boleh dengan sufiks huruf, mis. 2574 atau 2573.a">
-          <input className="input font-mono text-base font-bold" value={f.no_urut || ''} onChange={(e) => u('no_urut', e.target.value)} autoFocus placeholder="2574" />
+          <input className={`input font-mono text-base font-bold ${konflik.no ? '!border-rose-500 ring-2 ring-rose-200' : ''}`} value={f.no_urut || ''} onChange={(e) => u('no_urut', e.target.value.trim())} autoFocus placeholder="2574" />
+          {konflik.no && <p className="mt-1.5 rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-700">⚠ {konflik.no}</p>}
         </Field>
         <div className="rounded-xl border border-[#122922]/15 bg-[#f7f5ef] px-3.5 py-2 font-mono text-xs font-bold text-[#122922]">
           000.3.2/{f.no_urut || '…'}/05.1.2/{tahun}
@@ -45,7 +49,7 @@ function NomorModal({ data, tahun, onClose, onSaved }) {
           </Field>
         </div>
         {err && <p className="text-sm font-semibold text-rose-600">{err}</p>}
-        <button className="btn-primary w-full">Simpan Nomor</button>
+        <button className="btn-primary w-full disabled:opacity-50" disabled={!!konflik.no}>Simpan Nomor</button>
       </form>
     </Modal>
   )
@@ -61,17 +65,28 @@ export default function Nomor() {
   const [modal, setModal] = useState(null)
   const [pesan, setPesan] = useState('')
   const [galat, setGalat] = useState('')
+  const [tglCari, setTglCari] = useState('')
+  const [posisi, setPosisi] = useState(null)
+  const [hanyaKembar, setHanyaKembar] = useState(false)
 
   const load = useCallback(() => api('/nomor?tahun=' + tahun)
     .then((r) => { setItems(r.items); setGalat('') })
     .catch((e) => { setItems([]); setGalat(e.status === 404 ? 'Server belum diperbarui. Restart server (npm start) agar Monitoring Nomor aktif.' : e.message) }), [tahun])
   useEffect(() => { load() }, [load])
 
+  // posisi sebuah tanggal di antara nomor-nomor yang sudah ada
+  useEffect(() => {
+    if (!tglCari) { setPosisi(null); return undefined }
+    let batal = false
+    api(`/nomor/saran-tanggal?tahun=${tahun}&tanggal=${tglCari}`).then((r) => { if (!batal) setPosisi(r) }).catch(() => { if (!batal) setPosisi(null) })
+    return () => { batal = true }
+  }, [tglCari, tahun, items])
+
   const tambahTetangga = async (i, arah) => {
     setPesan('')
     try {
       const r = await api(`/nomor/saran?tahun=${tahun}&acuan=${encodeURIComponent(i.no_urut)}&arah=${arah}`)
-      setModal({ no_urut: r.no_urut, perihal: '', tanggal: '', keterangan: '' })
+      setModal({ no_urut: r.no_urut, perihal: '', tanggal: tglCari, keterangan: '' })
     } catch (e) { setPesan(e.message) }
   }
   const hapus = async (i) => {
@@ -86,19 +101,19 @@ export default function Nomor() {
   const baris = useMemo(() => {
     if (!items) return []
     const ql = q.trim().toLowerCase()
-    const cocok = items.filter((i) => (!jenis || i.jenis === jenis) && (!ql || `${i.no_urut} ${i.jenis} ${i.paket}`.toLowerCase().includes(ql)))
+    const cocok = items.filter((i) => (!jenis || i.jenis === jenis) && (!hanyaKembar || i.kembar) && (!tglCari || String(i.tanggal || '').slice(0, 10) === tglCari) && (!ql || `${i.no_urut} ${i.jenis} ${i.paket}`.toLowerCase().includes(ql)))
     const out = []
     cocok.forEach((i, idx) => {
       const prev = cocok[idx - 1]
       const a = angkaDari(prev?.no_urut), b = angkaDari(i.no_urut)
-      if (!ql && !jenis && prev && a != null && b != null) {
+      if (!ql && !jenis && !tglCari && !hanyaKembar && prev && a != null && b != null) {
         const kosong = b - a - 1
         if (kosong >= 1 && kosong <= 30) out.push({ gap: true, dari: a + 1, sampai: b - 1, kunci: `g${a}-${b}` })
       }
       out.push(i)
     })
     return out
-  }, [items, q, jenis])
+  }, [items, q, jenis, tglCari, hanyaKembar])
 
   const kembar = (items || []).filter((i) => i.kembar).length
   const manual = (items || []).filter((i) => i.sumber === 'manual').length
@@ -133,6 +148,17 @@ export default function Nomor() {
         ))}
       </div>
 
+      {kembar > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
+          <TriangleAlert size={18} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            Ada <b>{kembar}</b> dokumen dengan nomor kembar. Dokumen-dokumen itu <b>tidak bisa disimpan lagi</b> sebelum nomornya diganti — buka paketnya dari daftar di bawah, lalu ubah nomornya.
+          </span>
+          <button className="rounded-lg border border-rose-400 bg-white px-3 py-1.5 text-xs font-bold hover:bg-rose-100" onClick={() => setHanyaKembar((v) => !v)}>
+            {hanyaKembar ? 'Tampilkan semua nomor' : 'Tampilkan hanya yang kembar'}
+          </button>
+        </div>
+      )}
       {galat && <p className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700">{galat}</p>}
       {pesan && <p className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700">{pesan}</p>}
 
@@ -143,10 +169,59 @@ export default function Nomor() {
             <input className="input !pl-9" placeholder="Cari nomor, jenis dokumen, atau paket…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <div className="w-64"><SearchableSelect value={jenis} options={jenisOpsi} onChange={setJenis} placeholder="Semua jenis dokumen" /></div>
+          <div className="flex items-center gap-1.5">
+            <CalendarDays size={16} className="text-[#122922]/55" />
+            <input type="date" className="input !w-auto !py-2 font-mono text-sm" value={tglCari} min={`${tahun}-01-01`} max={`${tahun}-12-31`} onChange={(e) => setTglCari(e.target.value)} title="Cari nomor berdasarkan tanggal surat" />
+            {tglCari && <button type="button" title="Hapus pencarian tanggal" onClick={() => setTglCari('')} className="rounded-lg border border-[#122922]/20 p-1.5 hover:bg-rose-50"><X size={14} /></button>}
+          </div>
         </div>
 
+        {tglCari && posisi && (
+          <div className="grid gap-3 border-b border-[#122922]/12 bg-[#fffbe6] p-4 text-sm md:grid-cols-3">
+            {[['Nomor sebelum tanggal ini', posisi.sebelum], ['Nomor sesudah tanggal ini', posisi.sesudah]].map(([judul, i], n) => (
+              <div key={judul} className={n === 1 ? 'md:order-3' : ''}>
+                <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#122922]/60">{judul}</div>
+                {i ? (
+                  <>
+                    <div className="font-mono text-base font-extrabold">{i.no_urut} <span className="text-xs font-semibold text-[#122922]/60">· {tgl(i.tanggal)}</span></div>
+                    <div className="truncate text-xs text-[#122922]/70" title={i.paket}>{i.jenis}{i.paket ? ' — ' + i.paket : ''}</div>
+                  </>
+                ) : <div className="text-xs text-[#122922]/55">tidak ada</div>}
+              </div>
+            ))}
+            <div className="md:order-2">
+              <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#122922]/60">Pada {tgl(tglCari)}</div>
+              {posisi.pada.length ? (
+                <div className="text-xs">
+                  <div className="font-mono text-base font-extrabold">{posisi.pada[0].no_urut}{posisi.pada.length > 1 ? ` – ${posisi.pada[posisi.pada.length - 1].no_urut}` : ''}</div>
+                  <div className="text-[#122922]/70">{posisi.pada.length} nomor terpakai pada tanggal ini</div>
+                </div>
+              ) : <div className="text-xs font-semibold text-[#122922]/70">Belum ada nomor pada tanggal ini.</div>}
+              {bolehUbah && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {posisi.pada.length > 0 && (
+                    <button className="rounded-lg border border-[#122922]/25 bg-white px-2.5 py-1 text-xs font-bold hover:bg-[#d6ee30]" onClick={() => tambahTetangga(posisi.pada[0], 'atas')}>
+                      <ArrowUpToLine size={12} className="mr-1 inline" />Tambah di atas {posisi.pada[0].no_urut}
+                    </button>
+                  )}
+                  {posisi.pada.length > 0 && (
+                    <button className="rounded-lg border border-[#122922]/25 bg-white px-2.5 py-1 text-xs font-bold hover:bg-[#d6ee30]" onClick={() => tambahTetangga(posisi.pada[posisi.pada.length - 1], 'bawah')}>
+                      <ArrowDownToLine size={12} className="mr-1 inline" />Tambah di bawah {posisi.pada[posisi.pada.length - 1].no_urut}
+                    </button>
+                  )}
+                  {posisi.saran && posisi.pada.length === 0 && (
+                    <button className="rounded-lg border border-[#122922] bg-[#d6ee30] px-2.5 py-1 text-xs font-extrabold" onClick={() => setModal({ no_urut: posisi.saran, perihal: '', tanggal: tglCari, keterangan: '' })}>
+                      <Plus size={12} className="mr-1 inline" />Catat nomor {posisi.saran} untuk tanggal ini
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="tabel-kartu w-full">
             <thead className="border-b border-[#122922]/12 bg-[#f7f5ef]/40">
               <tr>
                 <th className="th">No. urut</th>
@@ -181,10 +256,10 @@ export default function Nomor() {
                   <td className="td whitespace-nowrap">
                     <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${r.sumber === 'manual' ? 'bg-[#a9dcf0]' : 'bg-[#d6ee30]/60'}`}>{r.jenis}</span>
                   </td>
-                  <td className="td max-w-md truncate text-sm text-[#122922]/80">
+                  <td className="td max-w-md text-sm text-[#122922]/80 md:truncate">
                     {r.sumber === 'dokumen' ? <Link className="hover:underline" to={linkPaket(r)}>{r.paket || `Paket #${r.transaksi_id}`}</Link> : (r.paket || '—')}
                   </td>
-                  <td className="td font-mono text-xs">{tgl(r.tanggal) || '—'}</td>
+                  <td className="td font-mono text-xs" data-label="Tanggal">{tgl(r.tanggal) || '—'}</td>
                   <td className="td">
                     <div className="flex justify-end gap-1">
                       {bolehUbah && (
@@ -205,7 +280,7 @@ export default function Nomor() {
               ))}
             </tbody>
           </table>
-          {items && !baris.length && <Empty>Belum ada nomor di tahun {tahun}.</Empty>}
+          {items && !baris.length && <Empty>{tglCari ? `Belum ada nomor pada ${tgl(tglCari)}.` : hanyaKembar ? 'Tidak ada nomor kembar.' : `Belum ada nomor di tahun ${tahun}.`}</Empty>}
         </div>
       </div>
 

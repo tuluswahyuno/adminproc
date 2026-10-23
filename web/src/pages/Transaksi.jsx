@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Download, Eye, FileText, Pencil, Plus, Printer, Search, Trash2,
   PackageCheck, FileCheck, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, Clock, Receipt, CalendarRange
@@ -188,7 +188,8 @@ export default function Transaksi() {
   const [q, setQ] = useState('')
   const [rekId, setRekId] = useState('')
   const [tahapFilter, setTahapFilter] = useState('')
-  const [kat, setKat] = useState('')
+  const [urlParams] = useSearchParams()
+  const [kat, setKat] = useState(() => (KATEGORI.some((k) => k.kode === urlParams.get('kategori')) ? urlParams.get('kategori') : ''))
   const [bulan, setBulan] = useState('')
   const [sortBy, setSortBy] = useState('tanggal')
   const [sortDir, setSortDir] = useState('desc')
@@ -362,8 +363,8 @@ export default function Transaksi() {
 
         {/* Tabel Responsif Tanpa Terpotong */}
         <div className="w-full">
-          <table className="w-full table-fixed">
-            <thead className="border-b border-[#122922]/12 bg-[#f7f5ef]/40">
+          <table className="block w-full md:table md:table-fixed">
+            <thead className="hidden border-b border-[#122922]/12 bg-[#f7f5ef]/40 md:table-header-group">
               <tr>
                 <th onClick={() => toggleSort('tanggal')} className="th w-[18%] cursor-pointer select-none hover:text-[#122922]">
                   Tanggal & Nomor <SortIcon col="tanggal" />
@@ -381,7 +382,7 @@ export default function Transaksi() {
                 <th className="th w-[15%] text-right">Aksi & Dokumen</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#122922]/10">
+            <tbody className="block divide-y divide-[#122922]/10 md:table-row-group">
               {sortedRows?.map((t) => {
                 const isLangsung = t.tahap === 'spj_langsung'
                 const is50750 = !isLangsung && (t.mode_pengadaan === '50_750' || ['undangan', 'evaluasi', 'penetapan', 'kontrak'].includes(t.tahap))
@@ -406,8 +407,8 @@ export default function Transaksi() {
                 const modePengadaan = is50750 ? '50_750' : (t.mode_pengadaan === '0_10' && Number(t.kotor) > 0 && Number(t.kotor) <= 2000000 ? '0_2' : t.mode_pengadaan || (Number(t.kotor) > 10000000 || t.hps_nomor || t.bakn_nomor ? '10_50' : '0_10'))
 
                 return (
-                  <tr key={t.id} className="transition hover:bg-[#f7f5ef]/70">
-                    <td className="td align-top">
+                  <tr key={t.id} className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-4 py-3.5 transition hover:bg-[#f7f5ef]/70 md:table-row md:p-0">
+                    <td className="td align-top order-1 max-md:!p-0">
                       <div className="font-bold text-[#122922]">{tgl(t.spk_tanggal || t.sp_tanggal || t.hps_tanggal || t.tanggal)}</div>
                       <div className="mt-1 space-y-0.5 font-mono text-[11px] text-[#122922]/70 break-all">
                         {isLangsung ? (
@@ -456,7 +457,7 @@ export default function Transaksi() {
                       </div>
                     </td>
 
-                    <td className="td align-top">
+                    <td className="td align-top order-3 col-span-2 max-md:!p-0">
                       <div className="font-extrabold text-[#122922] break-words">
                         {t.penyedia && t.penyedia !== '-' ? t.penyedia : <span className="italic text-[#122922]/50">Penyedia dipilih saat Negosiasi</span>}
                       </div>
@@ -471,7 +472,7 @@ export default function Transaksi() {
                       </div>
                     </td>
 
-                    <td className="td align-top">
+                    <td className="td align-top order-4 col-span-2 max-md:!p-0">
                       <span className="inline-block rounded-md border border-[#122922]/15 bg-[#f7f5ef] px-1.5 py-0.5 font-mono text-[11px] font-bold text-[#3f8f77]">
                         {t.rek_kode}
                       </span>
@@ -480,17 +481,17 @@ export default function Transaksi() {
                       </div>
                     </td>
 
-                    <td className="td align-top text-right font-mono font-extrabold tabular-nums text-[#122922]">
+                    <td className="td order-2 align-top text-right font-mono font-extrabold tabular-nums text-[#122922] max-md:!p-0">
                       {rp(t.kotor)}
                     </td>
 
-                    <td className="td align-top text-center">
+                    <td className="td order-5 col-span-2 align-top text-center max-md:text-left max-md:!p-0">
                       {isLangsung ? (
                         <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#b5e8a5] px-2.5 py-1 text-[10px] font-extrabold text-[#122922]">
                           <Receipt size={11} /> A2 & Verifikasi
                         </span>
                       ) : isSpektekOnly ? (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> 1. Spektek / KAK
                           </span>
@@ -502,7 +503,7 @@ export default function Transaksi() {
                           </Link>
                         </div>
                       ) : isHpsStage ? (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#f6db5b] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> 2. Penetapan HPS
                           </span>
@@ -514,7 +515,7 @@ export default function Transaksi() {
                           </Link>
                         </div>
                       ) : isUndangan ? (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#a9dcf0] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> 3. Undangan PL
                           </span>
@@ -526,7 +527,7 @@ export default function Transaksi() {
                           </Link>
                         </div>
                       ) : isEvaluasi ? (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#b7aef3] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> 4. Evaluasi PL
                           </span>
@@ -538,7 +539,7 @@ export default function Transaksi() {
                           </Link>
                         </div>
                       ) : isNegosiasi ? (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#a9dcf0] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> {is50750 ? '5. BA Klarifikasi' : '3. BA Negosiasi'}
                           </span>
@@ -550,7 +551,7 @@ export default function Transaksi() {
                           </Link>
                         </div>
                       ) : isPenetapan ? (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> 6. Penetapan & Lap.
                           </span>
@@ -562,7 +563,7 @@ export default function Transaksi() {
                           </Link>
                         </div>
                       ) : isKontrak ? (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#f6db5b] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> 7. Kontrak SPK
                           </span>
@@ -578,7 +579,7 @@ export default function Transaksi() {
                           <CheckCircle2 size={11} /> BAST & SPJ Selesai
                         </span>
                       ) : (
-                        <div className="flex flex-col items-center gap-1.5">
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#f6db5b] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
                             <Clock size={11} /> Surat Pesanan (SP)
                           </span>
@@ -592,8 +593,8 @@ export default function Transaksi() {
                       )}
                     </td>
 
-                    <td className="td align-top">
-                      <div className="flex flex-wrap items-center justify-end gap-1">
+                    <td className="td order-6 col-span-2 align-top max-md:!p-0">
+                      <div className="flex flex-wrap items-center justify-end gap-1 max-md:justify-between">
                         <CetakMenu id={t.id} tahap={modeTahap} modePengadaan={modePengadaan} onPreview={setPreview} />
                         <Link
                           to={linkPaket(t, '')}

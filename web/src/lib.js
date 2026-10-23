@@ -9,6 +9,15 @@ export async function api(path, { method = 'GET', body, form } = {}) {
 }
 
 export const rp = (n) => 'Rp' + Math.round(Number(n) || 0).toLocaleString('id-ID')
+// rupiah ringkas untuk grafik: 12,5 jt / 1,2 M
+export const rpRingkas = (n) => {
+  n = Number(n) || 0
+  const f = (v, sfx) => v.toLocaleString('id-ID', { maximumFractionDigits: v < 10 ? 1 : 0 }) + ' ' + sfx
+  if (n >= 1e9) return f(n / 1e9, 'M')
+  if (n >= 1e6) return f(n / 1e6, 'jt')
+  if (n >= 1e3) return f(n / 1e3, 'rb')
+  return String(Math.round(n))
+}
 export const num = (n) => Math.round(Number(n) || 0).toLocaleString('id-ID')
 export const persen = (n) => (Number(n) || 0).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + '%'
 

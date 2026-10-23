@@ -9,6 +9,7 @@ import { api, hitungPajak, kategoriOf, num, persen, rp, terbilang, kalimatTangga
 import { Field, KategoriBadge, PageHeader, Progress, SearchableSelect, konfirmasiHapus } from '../ui'
 import { CetakMenu, PreviewModal, filterDokByTahap } from './Transaksi'
 import { useAuth } from '../App'
+import { useKonflikNomor } from '../nomorCek'
 
 const hariIni = () => new Date().toISOString().slice(0, 10)
 
@@ -157,6 +158,11 @@ export const kosong = () => ({
   pl: defaultPl(),
   items: [itemBaru()],
 })
+
+// pesan merah di bawah kolom nomor surat bila nomor sudah dipakai
+const PesanKembar = ({ teks }) => (teks ? (
+  <p className="mt-1.5 rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold leading-snug text-rose-700">⚠ {teks}</p>
+) : null)
 
 export function RekeningPicker({ value, onPick, user, tahun }) {
   const [q, setQ] = useState('')
@@ -1304,7 +1310,16 @@ export default function TransaksiForm() {
   const kat = kategoriOf(nominalEfektif)
   const sisaSetelah = rek ? rek.sisa + awal - nominalEfektif : null
 
+  /* nomor kembar: diperiksa langsung ke server, simpan diblokir */
+  const entriNomor = []
+  if (!isLangsung && !is50750 && f.sp_no_urut) entriNomor.push({ kunci: 'sp', label: 'Surat Pesanan', no_urut: f.sp_no_urut })
+  if (!isLangsung && !is02 && f.bast_no_urut) entriNomor.push({ kunci: 'bast', label: 'BAST', no_urut: f.bast_no_urut })
+  if (!isLangsung && f.baphp_no_urut) entriNomor.push({ kunci: 'baphp', label: 'BAPHP', no_urut: f.baphp_no_urut })
+  const konflikNomor = useKonflikNomor(tahunBerjalan, saved, entriNomor)
+  const kembarAda = entriNomor.filter((e) => konflikNomor[e.kunci])
+
   const simpanTahap = async (targetTahap, openPreviewJenis = null) => {
+    if (kembarAda.length) { setErr('Ada nomor surat kembar: ' + kembarAda.map((e) => e.label).join(', ') + '. ' + konflikNomor[kembarAda[0].kunci]); return }
     setErr(''); setBusy(true)
     try {
       const isLangsung = targetTahap === 'spj_langsung' || step === 3
@@ -3310,6 +3325,7 @@ export default function TransaksiForm() {
                       />
                       <span className="px-2.5 font-mono text-xs font-semibold text-[#122922]/60">/05.1.2/{tahunBerjalan}</span>
                     </div>
+                    <PesanKembar teks={konflikNomor.sp} />
                   </Field>
 
                   <Field label="Tanggal Surat Pesanan" hint="mis. Sragen, 1 September 2026">
@@ -3533,6 +3549,7 @@ export default function TransaksiForm() {
                       />
                       <span className="px-2.5 font-mono text-xs font-semibold text-[#122922]/60">/05.1.2/{tahunBerjalan}</span>
                     </div>
+                    <PesanKembar teks={konflikNomor.bast} />
                   </Field>
 
                   <Field label="Tanggal BAST (Barang Diterima)">
@@ -3583,6 +3600,7 @@ export default function TransaksiForm() {
                       />
                       <span className="px-2.5 font-mono text-xs font-semibold text-[#122922]/60">/05.1.2/{tahunBerjalan}</span>
                     </div>
+                    <PesanKembar teks={konflikNomor.baphp} />
                   </Field>
 
                   <Field label="Tanggal BAPHP (Inputan Sendiri)">

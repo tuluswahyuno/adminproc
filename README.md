@@ -10,6 +10,8 @@ Aplikasi web untuk membuat dokumen **A2 (Surat Bukti Pengeluaran, A5)** dan **Le
 - Cetak A2 & Verifikasi → PDF atau Word, dengan pratinjau.
 - Verifikator/KPA/Bendahara dikelola di Pengaturan; setiap SPJ menyimpan pejabat saat dibuat (aman jika verifikator berganti tahun depan).
 - Peringatan jika melebihi sisa pagu.
+- **Monitoring Nomor**: buku register semua nomor surat; nomor kembar ditandai merah, dicek langsung saat mengisi dokumen (server menolak simpan bila kembar), pencarian menurut tanggal untuk menyisipkan nomor manual di atas/bawah nomor yang ada.
+- **Rekap SPPD** (dalam / luar daerah): rekap perjalanan dinas per periode, diisi per kegiatan (satu orang atau rombongan, kode booking/tiket/hotel per orang). Total rekap menjadi realisasi kode rekening Perjalanan Dinas (realisasi awal impor RBA tidak dihitung lagi bila rekening sudah punya rekap, agar tidak ganda). Unduh Excel format "FULL REKAP SPPD", satu sheet per periode; luar daerah punya versi ringkas (sampai JUMLAH + tanda tangan PPK) dan versi lengkap (+ armada & hotel). Akses: Administrator/Super User dan Pejabat Pengadaan pengampu rekening Perjalanan Dinas.
 
 ## Menjalankan (butuh Node.js 22+ dan MySQL)
 ```bash

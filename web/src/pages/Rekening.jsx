@@ -436,7 +436,7 @@ export default function Rekening() {
 
               {!isClosed && (
                 <div className="w-full">
-                  <table className="w-full table-fixed">
+                  <table className="tabel-kartu w-full md:table-fixed">
                     <thead className="border-b border-[#122922]/15 bg-[#f7f5ef]">
                       <tr>
                         <th className="th w-[5%] text-center !px-2">No</th>
@@ -467,9 +467,9 @@ export default function Rekening() {
                                 {r.kode}
                               </span>
                             </td>
-                            <td className="td !px-2.5 text-right font-mono text-xs font-bold tabular-nums text-[#122922] align-middle">{rp(r.pagu)}</td>
-                            <td className="td !px-2.5 text-right font-mono text-xs font-semibold tabular-nums text-[#3f8f77] align-middle">{rp(r.realisasi)}</td>
-                            <td className="td !px-2.5 text-right font-mono text-xs font-bold tabular-nums text-[#122922] align-middle">{rp(r.sisa)}</td>
+                            <td className="td !px-2.5 text-right font-mono text-xs font-bold tabular-nums text-[#122922] align-middle" data-label="Anggaran">{rp(r.pagu)}</td>
+                            <td className="td !px-2.5 text-right font-mono text-xs font-semibold tabular-nums text-[#3f8f77] align-middle" data-label="Realisasi">{rp(r.realisasi)}</td>
+                            <td className="td !px-2.5 text-right font-mono text-xs font-bold tabular-nums text-[#122922] align-middle" data-label="Sisa">{rp(r.sisa)}</td>
                             <td className="td !px-2.5 align-middle">
                               <div className="mb-1 flex justify-between font-mono text-[10px] font-bold text-[#122922]">
                                 <span>{persen(r.capaian)}</span>

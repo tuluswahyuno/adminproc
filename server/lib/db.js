@@ -354,6 +354,55 @@ async function migrateSchema() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  // 7b. Rekap SPPD periodik (perjalanan dinas dalam / luar daerah), terhubung ke kode rekening perjalanan dinas
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sppd_rekap (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      jenis VARCHAR(10) NOT NULL,
+      tahun SMALLINT NOT NULL,
+      tgl_mulai DATE NOT NULL,
+      tgl_selesai DATE NOT NULL,
+      tgl_ttd DATE NULL,
+      label VARCHAR(255) NOT NULL DEFAULT '',
+      rekening_id INT NULL,
+      ppk_id INT NULL,
+      dibuat_oleh INT NULL,
+      INDEX idx_sppd_rekap (jenis, tahun)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sppd_item (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      rekap_id INT NOT NULL,
+      urut INT NOT NULL DEFAULT 0,
+      nama VARCHAR(255) NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'ASN',
+      tgl_berangkat DATE NULL,
+      tgl_kembali DATE NULL,
+      los INT NOT NULL DEFAULT 1,
+      uh_tarif BIGINT NOT NULL DEFAULT 0,
+      uh_persen DECIMAL(6,2) NOT NULL DEFAULT 100,
+      uh_index BIGINT NOT NULL DEFAULT 0,
+      dk_tarif BIGINT NOT NULL DEFAULT 0,
+      dk_persen DECIMAL(6,2) NOT NULL DEFAULT 100,
+      dk_hari INT NOT NULL DEFAULT 0,
+      dk_total BIGINT NOT NULL DEFAULT 0,
+      tujuan VARCHAR(500) NOT NULL DEFAULT '',
+      acara VARCHAR(1000) NOT NULL DEFAULT '',
+      bbm BIGINT NOT NULL DEFAULT 0,
+      etol BIGINT NOT NULL DEFAULT 0,
+      penginapan BIGINT NOT NULL DEFAULT 0,
+      uh_total BIGINT NOT NULL DEFAULT 0,
+      transport_pp BIGINT NOT NULL DEFAULT 0,
+      transport_lokal BIGINT NOT NULL DEFAULT 0,
+      kontribusi BIGINT NOT NULL DEFAULT 0,
+      jumlah BIGINT NOT NULL DEFAULT 0,
+      no_rek VARCHAR(100) NOT NULL DEFAULT '',
+      detail_json MEDIUMTEXT NULL,
+      INDEX idx_sppd_item (rekap_id, urut)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
   // 8. Jalur dokumen mengikuti nilai paket (<= Rp50 jt = 10–50 jt, > Rp50 jt = 50–750 jt); data lama diseragamkan
   await pool.query(`UPDATE transaksi SET mode_pengadaan='10_50',
       tahap = CASE tahap WHEN 'undangan' THEN 'hps' WHEN 'evaluasi' THEN 'negosiasi' WHEN 'penetapan' THEN 'negosiasi' WHEN 'kontrak' THEN 'negosiasi' ELSE tahap END

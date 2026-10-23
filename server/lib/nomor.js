@@ -93,4 +93,87 @@ async function saranNomor(tahun, acuan, arah) {
   throw new Error('Semua sufiks pada nomor tetangga sudah terpakai');
 }
 
-module.exports = { daftarNomor, saranNomor, nomorManualSet, bagian };
+// Daftar nomor yang diajukan sebuah paket (kolom transaksi + pl_json bila alur 50–750 jt) untuk diperiksa kembar.
+function entriNomor(kol, pl, alurPl) {
+  const out = [];
+  for (const d of DOK_KOLOM) {
+    if (d.kolom === 'spk' && !alurPl) continue;
+    const v = String(kol[d.kolom] || '').trim();
+    if (v) out.push({ kunci: d.kolom, label: d.label, no_urut: v });
+  }
+  if (alurPl && pl) for (const d of DOK_PL) {
+    const v = String(pl[d.kolom + '_no_urut'] || '').trim();
+    if (v) out.push({ kunci: d.kolom, label: d.label, no_urut: v });
+  }
+  return out;
+}
+
+/* Periksa nomor sebuah paket / catatan manual terhadap seluruh nomor lain pada tahun yang sama
+   (dan terhadap nomor lain dalam paket itu sendiri). Mengembalikan { kunci: pesan }. */
+async function periksaKembar(tahun, entri, { idTrx = null, idManual = null } = {}) {
+  const konflik = {};
+  const daftar = await daftarNomor(tahun);
+  const lain = new Map();
+  for (const i of daftar) {
+    if (idTrx && Number(i.transaksi_id) === Number(idTrx)) continue;
+    if (idManual && i.sumber === 'manual' && Number(i.manual_id) === Number(idManual)) continue;
+    const k = i.no_urut.toLowerCase();
+    if (!lain.has(k)) lain.set(k, i);
+  }
+  const pernah = new Map();
+  for (const e of entri) {
+    const k = String(e.no_urut || '').trim().toLowerCase();
+    if (!k) continue;
+    const pakai = lain.get(k);
+    if (pakai) {
+      konflik[e.kunci] = pakai.sumber === 'manual'
+        ? 'Nomor ' + e.no_urut + ' sudah dicatat manual di Monitoring Nomor (' + pakai.jenis + '). Pilih nomor lain atau hapus catatannya.'
+        : 'Nomor ' + e.no_urut + ' sudah dipakai (' + pakai.jenis + (pakai.paket ? ' — ' + pakai.paket.slice(0, 70) : '') + '). Gunakan nomor lain.';
+    } else if (pernah.has(k)) {
+      konflik[e.kunci] = 'Nomor ' + e.no_urut + ' sama dengan nomor ' + pernah.get(k) + ' pada paket ini. Gunakan nomor lain.';
+    } else pernah.set(k, e.label);
+  }
+  return konflik;
+}
+
+// Saran nomor untuk sebuah tanggal: letaknya mengikuti urutan nomor pada tanggal-tanggal di sekitarnya.
+async function saranTanggal(tahun, tanggal) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tanggal || '')) throw new Error('Tanggal tidak valid');
+  const semua = await daftarNomor(tahun);
+  const dipakai = new Set(semua.map((i) => i.no_urut.toLowerCase()));
+  const daftar = semua.filter((i) => i.tanggal && bagian(i.no_urut));
+  const tgl10 = (i) => String(i.tanggal).slice(0, 10);
+  const urut = (arr) => [...arr].sort((a, b) => bandingUrut(a.no_urut, b.no_urut));
+  const pada = urut(daftar.filter((i) => tgl10(i) === tanggal));
+  const sebelumArr = daftar.filter((i) => tgl10(i) < tanggal);
+  const sesudahArr = daftar.filter((i) => tgl10(i) > tanggal);
+  // tanggal terdekat sebelum / sesudah; ambil nomor terbesar (sebelum) atau terkecil (sesudah) pada tanggal itu
+  const tglSebelum = sebelumArr.reduce((m, i) => (tgl10(i) > m ? tgl10(i) : m), '');
+  const tglSesudah = sesudahArr.reduce((m, i) => (!m || tgl10(i) < m ? tgl10(i) : m), '');
+  const sebelum = urut(sebelumArr.filter((i) => tgl10(i) === tglSebelum)).pop() || null;
+  const sesudah = urut(sesudahArr.filter((i) => tgl10(i) === tglSesudah))[0] || null;
+
+  const acuan = pada.length ? pada[pada.length - 1] : sebelum;
+  const batas = sesudah ? bagian(sesudah.no_urut) : null;
+  let saran = '';
+  if (acuan) {
+    const b = bagian(acuan.no_urut);
+    let berikut = b.angka + 1;
+    if (!batas) while (dipakai.has(String(berikut))) berikut++; // tanggal paling akhir: nomor kosong pertama di atasnya
+    // bila ada tanggal sesudahnya, nomor berikutnya hanya dipakai kalau masih muat sebelum nomor di sana
+    if (!dipakai.has(String(berikut)) && (!batas || berikut < batas.angka)) saran = String(berikut);
+    else {
+      for (const sfx of 'abcdefghijklmnopqrstuvwxyz') {
+        const c = b.angka + '.' + sfx;
+        if (!dipakai.has(c) && b.sufiks < sfx) { saran = c; break; }
+      }
+    }
+  } else if (sesudah) {
+    const b = bagian(sesudah.no_urut);
+    if (b.angka > 1 && !dipakai.has(String(b.angka - 1))) saran = String(b.angka - 1);
+  }
+  const ringkas = (i) => (i ? { no_urut: i.no_urut, jenis: i.jenis, paket: i.paket, tanggal: i.tanggal } : null);
+  return { saran, sebelum: ringkas(sebelum), sesudah: ringkas(sesudah), pada: pada.map(ringkas) };
+}
+
+module.exports = { daftarNomor, saranNomor, saranTanggal, nomorManualSet, periksaKembar, entriNomor, bagian };

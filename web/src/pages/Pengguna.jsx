@@ -293,7 +293,7 @@ export default function Pengguna() {
         </div>
 
         <div className="w-full">
-          <table className="w-full table-fixed">
+          <table className="tabel-kartu w-full md:table-fixed">
             <thead className="border-b border-[#122922]/15 bg-[#f7f5ef]/50">
               <tr>
                 <th className="th w-[26%]">Nama Pengguna &amp; Username</th>

@@ -3,7 +3,7 @@ import { BrowserRouter, NavLink, Navigate, Route, Routes, Link, useNavigate } fr
 import {
   FileText, LayoutDashboard, ListTree, LogOut, Receipt, Settings,
   Users, Building2, KeyRound, Plus, Sparkles, Menu, X, ChevronRight, ShieldCheck,
-  UserCog, Calendar, RefreshCw, Hash
+  UserCog, Calendar, RefreshCw, Hash, Plane
 } from 'lucide-react'
 import { api, ROLE_LABEL, PERAN } from './lib'
 import Login from './pages/Login'
@@ -17,6 +17,7 @@ import Penyedia from './pages/Penyedia'
 import Pengguna from './pages/Pengguna'
 import Pengaturan from './pages/Pengaturan'
 import Nomor from './pages/Nomor'
+import Sppd from './pages/Sppd'
 import { Modal, Field, SearchableSelect, BuatDokumenMenu } from './ui'
 
 const Auth = createContext(null)
@@ -26,6 +27,7 @@ const NAV = [
   { to: '/', label: 'Dashboard', desc: 'Ringkasan & analitik anggaran', icon: LayoutDashboard, end: true },
   { to: '/transaksi', label: 'Dokumen Pengadaan', desc: 'Kelola paket & berkas SPJ', icon: Receipt },
   { to: '/nomor', label: 'Monitoring Nomor', desc: 'Buku register nomor surat', icon: Hash },
+  { to: '/sppd', label: 'Rekap SPPD', desc: 'Perjalanan dinas dalam & luar daerah', icon: Plane },
   { to: '/rekening', label: 'Kode Rekening', desc: 'Struktur & pagu anggaran RBA', icon: ListTree },
   { to: '/penyedia', label: 'Data Penyedia', desc: 'Direktori rekanan & perusahaan', icon: Building2 },
   { to: '/pejabat', label: 'Pejabat & Tim', desc: 'Pejabat Pengadaan, PPK & PPTK', icon: Users },
@@ -209,6 +211,9 @@ function Layout({ children }) {
   const [pw, setPw] = useState(false)
   const [suOpen, setSuOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  // menu Rekap SPPD hanya untuk Administrator dan Pejabat Pengadaan pengampu rekening Perjalanan Dinas
+  const [adaSppd, setAdaSppd] = useState(false)
+  useEffect(() => { api('/sppd/akses').then((a) => setAdaSppd(!!(a.dalam || a.luar))).catch(() => setAdaSppd(false)) }, [user?.id, user?.role, user?.pejabat_id])
   const nav = useNavigate()
   const keluar = async () => { await api('/logout', { method: 'POST' }); setUser(null); nav('/') }
   const initials = (user.nama || 'U').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
@@ -260,7 +265,7 @@ function Layout({ children }) {
             Menu Utama
           </div>
           <nav className="space-y-1">
-            {NAV.map(({ to, label, desc, icon: Icon, end }) => (
+            {NAV.filter((m) => m.to !== '/sppd' || adaSppd).map(({ to, label, desc, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -422,7 +427,7 @@ export default function App() {
     if (saved && saved !== 'semua' && Number(saved) > Number(curYear)) return curYear
     return saved || curYear
   })
-  const [tahunList, setTahunList] = useState(['2026', '2025'])
+  const [tahunList, setTahunList] = useState([curYear])
 
   useEffect(() => {
     api('/me').then(setUser).catch(() => setUser(null))
@@ -432,8 +437,9 @@ export default function App() {
     if (!user) return
     api('/tahun-list').then((r) => {
       if (r.list?.length) {
-        const validYears = r.list.filter((y) => Number(y) <= Number(curYear)).sort((a, b) => b.localeCompare(a))
-        setTahunList(validYears.length ? validYears : ['2026', '2025'])
+        // tahun berjalan selalu ada, sehingga pilihan tahun bertambah sendiri tiap pergantian tahun
+        const validYears = [...new Set([...r.list, curYear])].filter((y) => Number(y) <= Number(curYear)).sort((a, b) => b.localeCompare(a))
+        setTahunList(validYears)
       }
       if (!localStorage.getItem('spj_tahun') && r.tahunAktif) {
         setTahun(r.tahunAktif)
@@ -460,6 +466,7 @@ export default function App() {
             <Route path="/pengadaan/baru" element={<PengadaanWizard />} />
             <Route path="/pengadaan/:id" element={<PengadaanWizard />} />
             <Route path="/nomor" element={<Nomor />} />
+            <Route path="/sppd" element={<Sppd />} />
             <Route path="/rekening" element={<Rekening />} />
             <Route path="/penyedia" element={<Penyedia />} />
             <Route path="/pejabat" element={<Pejabat />} />

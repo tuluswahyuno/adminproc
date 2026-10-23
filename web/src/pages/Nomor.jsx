@@ -60,8 +60,11 @@ export default function Nomor() {
   const [jenis, setJenis] = useState('')
   const [modal, setModal] = useState(null)
   const [pesan, setPesan] = useState('')
+  const [galat, setGalat] = useState('')
 
-  const load = useCallback(() => api('/nomor?tahun=' + tahun).then((r) => setItems(r.items)), [tahun])
+  const load = useCallback(() => api('/nomor?tahun=' + tahun)
+    .then((r) => { setItems(r.items); setGalat('') })
+    .catch((e) => { setItems([]); setGalat(e.status === 404 ? 'Server belum diperbarui. Restart server (npm start) agar Monitoring Nomor aktif.' : e.message) }), [tahun])
   useEffect(() => { load() }, [load])
 
   const tambahTetangga = async (i, arah) => {
@@ -130,6 +133,7 @@ export default function Nomor() {
         ))}
       </div>
 
+      {galat && <p className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700">{galat}</p>}
       {pesan && <p className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700">{pesan}</p>}
 
       <div className="card overflow-hidden">

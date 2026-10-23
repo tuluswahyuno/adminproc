@@ -69,7 +69,8 @@ export function BuatDokumenMenu({
 
   const tiers = [
     { label: 'A2 + Verifikasi saja', url: '/transaksi/baru?mode=langsung', icon: Receipt },
-    { label: '0–2jt dan 2–10jt', url: '/transaksi/baru', icon: Package },
+    { label: '0–2jt (SP · BAPHP)', url: '/transaksi/baru?mode=0_2', icon: Package },
+    { label: '2–10jt (SP · BAST · BAPHP)', url: '/transaksi/baru', icon: Package },
     { label: '10–50jt', url: '/pengadaan/baru?tier=10_50', icon: FileText },
     { label: '50–750jt', url: '/pengadaan/baru?tier=50_750', icon: Layers },
   ]

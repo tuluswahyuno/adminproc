@@ -82,7 +82,7 @@ function SalinModal({ open, onClose, tahunList, ke, onDone }) {
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const asal = tahunList.filter((t) => t !== ke)
-  useEffect(() => { if (open) { setDari(asal[0] || ''); setMsg('') } }, [open, ke])
+  useEffect(() => { if (open) { const skr = String(new Date().getFullYear()); setDari(asal.includes(skr) ? skr : (asal[0] || '')); setMsg('') } }, [open, ke])
   const go = async () => {
     setBusy(true); setMsg('')
     try {
@@ -103,6 +103,29 @@ function SalinModal({ open, onClose, tahunList, ke, onDone }) {
         {msg && <p className="rounded-xl border border-[#122922]/20 bg-[#f7f5ef] px-3.5 py-2.5 text-sm font-semibold text-[#122922]">{msg}</p>}
         <button className="btn-primary w-full" disabled={!dari || busy} onClick={go}>{busy ? 'Menyalin…' : `Salin ke RAB ${ke}`}</button>
       </div>
+    </Modal>
+  )
+}
+
+function TahunModal({ open, onClose, saran, onDone }) {
+  const [th, setTh] = useState(saran)
+  const [err, setErr] = useState('')
+  useEffect(() => { if (open) { setTh(saran); setErr('') } }, [open, saran])
+  const simpan = async (e) => {
+    e.preventDefault()
+    try { const r = await api('/rekening/tahun', { method: 'POST', body: { tahun: Number(th) } }); onDone(r.tahun) }
+    catch (er) { setErr(er.message) }
+  }
+  return (
+    <Modal open={open} onClose={onClose} title="Tambah Tahun RAB">
+      <form onSubmit={simpan} className="space-y-3.5">
+        <p className="text-xs text-[#122922]/75">Buat RAB tahun baru untuk perencanaan, misalnya tahun depan. Setelah dibuat, Anda bisa menyalin kode rekening dari tahun lain atau mengimpor Excel.</p>
+        <Field label="Tahun anggaran">
+          <input type="number" min="2000" max="2100" className="input font-mono text-base font-bold" value={th} onChange={(e) => setTh(e.target.value)} autoFocus />
+        </Field>
+        {err && <p className="text-sm font-semibold text-rose-600">{err}</p>}
+        <button className="btn-primary w-full">Tambah RAB {th}</button>
+      </form>
     </Modal>
   )
 }
@@ -219,6 +242,7 @@ export default function Rekening() {
   const [edit, setEdit] = useState(null)
   const [imp, setImp] = useState(false)
   const [salin, setSalin] = useState(false)
+  const [tahunBaru, setTahunBaru] = useState(false)
   // RAB dikelola per tahun anggaran; awalnya mengikuti tahun global
   const [thRab, setThRab] = useState(tahunGlobal && tahunGlobal !== 'semua' ? tahunGlobal : String(new Date().getFullYear()))
   const [tahunOpts, setTahunOpts] = useState([thRab])
@@ -310,6 +334,11 @@ export default function Rekening() {
         <select className="input !w-auto !py-2 font-mono text-sm font-extrabold" value={thRab} onChange={(e) => setThRab(e.target.value)} title="Tahun anggaran RAB">
           {tahunOpts.map((t) => <option key={t} value={t}>RAB {t}</option>)}
         </select>
+        {canManage && (
+          <button className="btn-ghost" onClick={() => setTahunBaru(true)} title="Buat RAB untuk tahun baru / tahun depan">
+            <Plus size={15} /> Tahun
+          </button>
+        )}
         {canManage && (
           <>
             <a
@@ -508,6 +537,10 @@ export default function Rekening() {
       </div>
 
       <ImportModal open={imp} onClose={() => setImp(false)} onDone={(th) => { if (th) setThRab(String(th)); muatTahun(); load() }} tahun={tahun} />
+      <TahunModal
+        open={tahunBaru} onClose={() => setTahunBaru(false)} saran={String(Math.max(...tahunOpts.map(Number)) + 1)}
+        onDone={(th) => { setTahunBaru(false); setThRab(String(th)); muatTahun(); load(); setSalin(true) }}
+      />
       <SalinModal open={salin} onClose={() => setSalin(false)} tahunList={tahunOpts} ke={thRab} onDone={() => { muatTahun(); load() }} />
       {edit && <RekModal rek={edit} pejabat={pejabat} onClose={() => setEdit(null)} onSaved={load} />}
     </>

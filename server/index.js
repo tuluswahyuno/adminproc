@@ -5,7 +5,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { db, getSettings, migrateSchema, INDUK_MAP } = require('./lib/db');
-const { kategori, KATEGORI, hitungPajak, passwordAcak } = require('./lib/util');
+const { kategori, KATEGORI, hitungPajak, passwordAcak, modeAlur, tahapUntukMode } = require('./lib/util');
 const { buatDokumen, getSpektekData } = require('./lib/docs');
 const { importRealisasi, listSheets, generateTemplateExcel } = require('./lib/import');
 const { daftarNomor, saranNomor, nomorManualSet, bagian: bagianNomor } = require('./lib/nomor');
@@ -340,7 +340,7 @@ app.get('/api/spektek/standar', wrap(async (req, res) => {
 app.get('/api/penomoran/next', wrap(async (req, res) => {
   const s = await getSettings();
   const tahun = req.query.tahun || s.tahun || String(new Date().getFullYear());
-  const rows = await db.prepare('SELECT hps_no_urut, bakn_no_urut, sp_no_urut, bast_no_urut, spk_no_urut, pl_json FROM transaksi WHERE SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=?').all(tahun);
+  const rows = await db.prepare('SELECT hps_no_urut, bakn_no_urut, sp_no_urut, bast_no_urut, baphp_no_urut, spk_no_urut, pl_json FROM transaksi WHERE SUBSTR(COALESCE(sp_tanggal, tanggal),1,4)=?').all(tahun);
   // Nomor terakhir tiap buku register; dipakai bila belum ada data di tahun tsb.
   const maks = { hps: 1285, sp: 1606, bast: 1630, undangan: 2435, pembukaan: 2572, klarifikasi: 2577, penetapan: 2655, laporan: 2656, sppbj: 1768, spk: 2672 };
   // '2573.b' -> 2573
@@ -352,6 +352,7 @@ app.get('/api/penomoran/next', wrap(async (req, res) => {
     naik('hps', r.hps_no_urut);
     naik('sp', r.sp_no_urut);
     naik('sp', r.bakn_no_urut); // BAKN dinomori sederet dengan SP (N.a)
+    naik('bast', r.baphp_no_urut); // alur 0–2 jt: BAPHP memakai deret nomor BAST
     naik('bast', r.bast_no_urut);
     naik('spk', r.spk_no_urut);
     let pl = {};
@@ -567,11 +568,23 @@ app.post('/api/rekening/salin', adminOrPep, wrap(async (req, res) => {
 }));
 
 // Daftar tahun RAB: yang sudah ada + tahun berjalan + tahun depan
+// Tahun yang ditambahkan manual (mis. perencanaan tahun depan) disimpan di pengaturan.rab_tahun
+const tahunRabTambahan = async () => {
+  const r = await db.prepare(`SELECT v FROM pengaturan WHERE k='rab_tahun'`).get();
+  return String(r?.v || '').split(',').map(Number).filter((n) => n >= 2000 && n <= 2100);
+};
 app.get('/api/rekening/tahun', wrap(async (req, res) => {
   const rows = await db.prepare('SELECT DISTINCT tahun FROM rekening WHERE tahun>0').all();
   const sekarang = new Date().getFullYear();
-  const set = new Set([sekarang, sekarang + 1, ...rows.map((r) => Number(r.tahun))]);
+  const set = new Set([sekarang, sekarang + 1, ...rows.map((r) => Number(r.tahun)), ...(await tahunRabTambahan())]);
   res.json([...set].sort((a, b) => b - a).map(String));
+}));
+app.post('/api/rekening/tahun', adminOrPep, wrap(async (req, res) => {
+  const th = Number(req.body?.tahun);
+  if (!Number.isInteger(th) || th < 2000 || th > 2100) return res.status(400).json({ error: 'Tahun harus berupa angka 2000–2100' });
+  const baru = [...new Set([...(await tahunRabTambahan()), th])].sort((a, b) => a - b);
+  await db.prepare(`INSERT INTO pengaturan(k,v) VALUES('rab_tahun',?) ON DUPLICATE KEY UPDATE v=VALUES(v)`).run(baru.join(','));
+  res.json({ tahun: String(th) });
 }));
 app.put('/api/rekening/:id', adminOrPep, wrap(async (req, res) => {
   const { kode, uraian, pagu, realisasi_awal, induk_kode, induk_uraian, no_urut, ppkom_id, pptk_id, pengadaan_id } = req.body;
@@ -711,16 +724,15 @@ function bacaTrx(b, user, tahunDefault) {
   const bastNomor = String(b.bast_nomor || '').trim() || (bastUrut ? `000.3.2/${bastUrut}/05.1.2/${thn}` : '');
   const baphpNomor = String(b.baphp_nomor || '').trim() || (baphpUrut ? `000.3.2/${baphpUrut}/05.1.2/${thn}` : '');
   const isSpjLangsung = b.tahap === 'spj_langsung';
-  const modePengadaan = isSpjLangsung
-    ? '0_10'
-    : (b.mode_pengadaan && ['0_10', '10_50', '50_750'].includes(b.mode_pengadaan)
-        ? b.mode_pengadaan
-        : (kotor > 50000000 ? '50_750' : kotor > 10000000 || hpsNomor || baknNomor ? '10_50' : '0_10'));
+  const modeAwal = b.mode_pengadaan && ['0_10', '10_50', '50_750'].includes(b.mode_pengadaan)
+    ? b.mode_pengadaan
+    : (kotor > 50000000 ? '50_750' : kotor > 10000000 || hpsNomor || baknNomor ? '10_50' : '0_10');
+  const modePengadaan = isSpjLangsung ? '0_10' : modeAlur(modeAwal, kotor);
 
   const validTahap = ['spektek', 'hps', 'spektek_hps', 'undangan', 'evaluasi', 'negosiasi', 'penetapan', 'kontrak', 'pesanan', 'selesai', 'spj_langsung'];
   const tahap = isSpjLangsung
     ? 'spj_langsung'
-    : (validTahap.includes(b.tahap) ? b.tahap : (bastNomor ? 'selesai' : modePengadaan === '50_750' ? 'undangan' : 'pesanan'));
+    : tahapUntukMode(modePengadaan, validTahap.includes(b.tahap) ? b.tahap : (bastNomor ? 'selesai' : modePengadaan === '50_750' ? 'undangan' : 'pesanan'));
 
   const is50750 = modePengadaan === '50_750';
   const spkUrut = is50750 ? String(b.spk_no_urut || b.pl?.spk_no_urut || '').trim() : '';
@@ -749,9 +761,8 @@ function bacaTrx(b, user, tahunDefault) {
   const spektekStr = is50750 || modePengadaan === '10_50'
     ? (typeof b.spektek === 'object' && b.spektek !== null ? JSON.stringify(b.spektek) : (typeof b.spektek_json === 'string' ? b.spektek_json : null))
     : null;
-  const plStr = is50750
-    ? (typeof b.pl === 'object' && b.pl !== null ? JSON.stringify(b.pl) : (typeof b.pl_json === 'string' ? b.pl_json : null))
-    : null;
+  // data alur 50–750 jt tetap disimpan walau paket sementara berada di jalur 10–50 jt (nilai bisa berubah)
+  const plStr = typeof b.pl === 'object' && b.pl !== null ? JSON.stringify(b.pl) : (typeof b.pl_json === 'string' ? b.pl_json : null);
 
   return {
     fields: [

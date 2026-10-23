@@ -53,6 +53,21 @@ function kategori(n) {
   return (KATEGORI.find((k) => n <= k.max) || { kode: 'K5', label: '> 750 jt' }).kode;
 }
 
+// Jalur dokumen mengikuti nilai paket: sampai Rp50 juta = 10–50 jt, di atasnya = 50–750 jt (nilai 0 = belum ditentukan).
+const BATAS_ALUR_PL = 50_000_000;
+function modeAlur(mode, nilai) {
+  if (mode !== '10_50' && mode !== '50_750') return mode;
+  const n = Number(nilai) || 0;
+  if (n <= 0) return mode;
+  return n > BATAS_ALUR_PL ? '50_750' : '10_50';
+}
+// tahap yang hanya ada di satu jalur dipetakan ke tahap setara di jalur tujuan
+function tahapUntukMode(mode, tahap) {
+  if (mode === '10_50') return { undangan: 'hps', evaluasi: 'negosiasi', penetapan: 'negosiasi', kontrak: 'negosiasi' }[tahap] || tahap;
+  if (mode === '50_750') return { pesanan: 'kontrak' }[tahap] || tahap;
+  return tahap;
+}
+
 const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -76,5 +91,5 @@ function tglKalimatBast(iso) {
   };
 }
 
-module.exports = { passwordAcak, terbilang, baca, rupiah, hitungPajak, kategori, KATEGORI, tglIndo, tglKalimatBast };
+module.exports = { modeAlur, tahapUntukMode, BATAS_ALUR_PL, passwordAcak, terbilang, baca, rupiah, hitungPajak, kategori, KATEGORI, tglIndo, tglKalimatBast };
 

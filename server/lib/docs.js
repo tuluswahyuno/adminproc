@@ -20,6 +20,8 @@ async function ambilData(id) {
   const rek = await db.prepare('SELECT * FROM rekening WHERE id=?').get(t.rekening_id);
   const pj = async (pid) => (pid ? await db.prepare('SELECT nama,nip,jabatan,alamat FROM pejabat WHERE id=?').get(pid) : null) || { nama: '', nip: '', jabatan: '', alamat: '' };
   const s = await getSettings();
+  // uraian kosong -> nama kode rekening; jabatan & alamat PPK diambil dari menu Pejabat & Tim
+  if (!String(t.uraian || '').trim()) t.uraian = rek?.uraian || '';
   const pajak = hitungPajak({ kotor: t.kotor, ppn: !!t.ppn_aktif, pph: !!t.pph_aktif, ppnTarif: t.ppn_tarif, pphTarif: t.pph_tarif });
   let items = await db.prepare('SELECT * FROM transaksi_item WHERE transaksi_id=? ORDER BY urut, id').all(id);
   if (!items || items.length === 0) {
@@ -38,18 +40,22 @@ async function ambilData(id) {
   const hpsTotal = Number(t.hps_total) || sumHps || Number(t.kotor) || 0;
   const penawaranTotal = Number(t.penawaran_total) || sumPen || 0;
 
+  const ppkomData = await pj(t.ppkom_id || rek?.ppkom_id);
+  if (ppkomData.jabatan) t.ppk_jabatan = ppkomData.jabatan;
+  if (ppkomData.alamat) t.ppk_alamat = ppkomData.alamat;
+
   return {
     s, t, rek, pajak, items, spektek, pl,
     hpsTotal,
     penawaranTotal,
     terbilangHps: terbilang(hpsTotal),
     terbilangPenawaran: penawaranTotal > 0 ? terbilang(penawaranTotal) : '-',
-    kpa: await pj(t.kpa_id),
+    kpa: await pj(t.kpa_id || s.kpa_id),
     ppkom: await pj(t.ppkom_id || rek?.ppkom_id),
     pptk: await pj(t.pptk_id || rek?.pptk_id),
     pengadaan: await pj(t.pengadaan_id || rek?.pengadaan_id),
-    bend: await pj(t.bendahara_id),
-    ver: await pj(t.verifikator_id),
+    bend: await pj(t.bendahara_id || s.bendahara_id),
+    ver: await pj(t.verifikator_id || s.verifikator_id),
     pengurus: await pj(t.pengurus_barang_id || s.pengurus_barang_id),
     terbilang: terbilang(t.kotor),
     tahun: (t.sp_tanggal || t.hps_tanggal || t.tanggal || '').slice(0, 4) || s.tahun || new Date().getFullYear(),
@@ -210,7 +216,8 @@ function a2Pdf(d) {
   // ── DIVIDER VERTIKAL ────────────────────────────────────────────────────
   seg(X[5], Y0,           X[5], yPenerimaTop); // Kolom E|F (Kop s/d Isian)
   seg(X[5], yPenerimaTop, X[5], Y_BOTTOM);     // Kolom E|F (Penerima & TTD)
-  seg(X[1], yTtdTop,      X[1], Y_BOTTOM);     // Kolom A|B (Zona TTD KPA)
+  const X_KPA = X[0] + 186;                    // batas kolom TTD KPA | PPTK
+  seg(X_KPA, yTtdTop,     X_KPA, Y_BOTTOM);    // Zona TTD KPA
 
   // ── SUB-BARIS ISIAN (Kiri: X[2] s/d X[5]) ────────────────────────────────
   seg(X[2], yDibayarkanBot, X[5], yDibayarkanBot, hair);
@@ -297,8 +304,8 @@ function a2Pdf(d) {
   const inst1 = 'RSUD dr. Soeratno Gemolong';
   const inst2 = 'RSUD dr.Soeratno Gemolong';
 
-  const wColKpa = X[1] - X[0];      // 158 pt
-  const wColPptk = X[5] - X[1];     // 198 pt (C..E)
+  const wColKpa = X_KPA - X[0];     // 186 pt
+  const wColPptk = X[5] - X_KPA;    // 170 pt
   const wColBend = X[8] - X[5];     // 187.28 pt (F..H)
 
   const yTtdTitle = yTtdTop + 8;
@@ -311,8 +318,8 @@ function a2Pdf(d) {
   txt('Selaku Kuasa Pengguna Anggaran', X[0], yTtdTitle + kpaLH * 3, wColKpa, { align: 'center', size: 6.8 });
 
   // Kolom 2: PPTK (Regular, tidak bold)
-  txt('PPTK', X[1], yTtdTitle,         wColPptk, { align: 'center', size: 8.0 });
-  txt(inst2,  X[1], yTtdTitle + kpaLH, wColPptk, { align: 'center', size: 7.8 });
+  txt('PPTK', X_KPA, yTtdTitle,         wColPptk, { align: 'center', size: 8.0 });
+  txt(inst2,  X_KPA, yTtdTitle + kpaLH, wColPptk, { align: 'center', size: 7.8 });
 
   // Kolom 3: Bendahara
   txt(TTD_BEND, X[5], yTtdTitle,         wColBend, { align: 'center', size: 7.8 });
@@ -325,8 +332,8 @@ function a2Pdf(d) {
   fitOneLine(d.kpa.nama, X[0] + 4, yNama, wColKpa - 8, 8.0, { align: 'center', ul: true });
   fitOneLine(nipTxt(d.kpa.nip), X[0] + 4, yNip, wColKpa - 8, 7.5, { align: 'center' });
 
-  fitOneLine(d.pptk.nama, X[1] + 4, yNama, wColPptk - 8, 8.0, { align: 'center', ul: true });
-  fitOneLine(nipTxt(d.pptk.nip), X[1] + 4, yNip, wColPptk - 8, 7.5, { align: 'center' });
+  fitOneLine(d.pptk.nama, X_KPA + 4, yNama, wColPptk - 8, 8.0, { align: 'center', ul: true });
+  fitOneLine(nipTxt(d.pptk.nip), X_KPA + 4, yNip, wColPptk - 8, 7.5, { align: 'center' });
 
   fitOneLine(d.bend.nama, X[5] + 4, yNama, wColBend - 8, 8.0, { align: 'center', ul: true });
   fitOneLine(nipTxt(d.bend.nip), X[5] + 4, yNip, wColBend - 8, 7.5, { align: 'center' });
@@ -364,7 +371,7 @@ async function a2Docx(d) {
   const W_PAGE = 11906;
   const H_PAGE = 9354;
 
-  const CW = [3160, 280, 1080, 1080, 1520, 1240, 1060, 1446];
+  const CW = [3560, 280, 880, 880, 1520, 1240, 1060, 1446];
   const sumW = (a, b) => CW.slice(a, b).reduce((s, x) => s + x, 0);
   const FS = 15; // 7.5pt
   const adaPajak = d.t.ppn_aktif || d.t.pph_aktif;
@@ -1044,7 +1051,7 @@ function bastPdf(d) {
   doc.text('Penyedia Barang/Jasa', xColR, y, { width: wColR, align: 'center' });
   doc.text((d.t.penyedia || '').split('\n')[0], xColR, y + 13, { width: wColR, align: 'center' });
 
-  const yName = y + 66;
+  const yName = y + 100;
   doc.text(d.ppkom.nama || '………………………………', xColL, yName, { width: wColL, align: 'center' });
   doc.text(nipTxt(d.ppkom.nip), xColL, yName + 13, { width: wColL, align: 'center' });
 
@@ -1266,14 +1273,14 @@ async function bastDocx(d) {
           cell([
             para(run('Pejabat Pembuat Komitmen', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run('RSUD dr. Soeratno Gemolong', { size: 20 }), { align: D.AlignmentType.CENTER }),
-            para(run(''), { before: 650 }),
+            para(run(''), { before: 1250 }),
             para(run(d.ppkom.nama || '………………………………', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run(nipTxt(d.ppkom.nip), { size: 20 }), { align: D.AlignmentType.CENTER }),
           ], { w: 4513 }),
           cell([
             para(run('Penyedia Barang/Jasa', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run((d.t.penyedia || '').split('\n')[0], { size: 20 }), { align: D.AlignmentType.CENTER }),
-            para(run(''), { before: 650 }),
+            para(run(''), { before: 1250 }),
             para(run(d.t.penyedia_pimpinan || '………………………………', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run(d.t.penyedia_jabatan || 'Direktur', { size: 20 }), { align: D.AlignmentType.CENTER }),
           ], { w: 4513 }),
@@ -1419,7 +1426,7 @@ function baphpPdf(d) {
   doc.text('Kuasa Pengguna Anggaran', xColR, y, { width: wColR, align: 'center' });
   doc.text(d.kpa.jabatan || 'Direktur RSUD dr. Soeratno Gemolong', xColR, y + 13, { width: wColR, align: 'center' });
 
-  const yName = y + 60;
+  const yName = y + 96;
   doc.text(d.ppkom.nama || '………………………………', xColL, yName, { width: wColL, align: 'center' });
   doc.text(nipTxt(d.ppkom.nip), xColL, yName + 13, { width: wColL, align: 'center' });
 
@@ -1459,14 +1466,14 @@ async function baphpDocx(d) {
           cell([
             para(run('Pejabat Pembuat Komitmen', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run('RSUD dr. Soeratno Gemolong', { size: 20 }), { align: D.AlignmentType.CENTER }),
-            para(run(''), { before: 600 }),
+            para(run(''), { before: 1200 }),
             para(run(d.ppkom.nama || '………………………………', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run(nipTxt(d.ppkom.nip), { size: 20 }), { align: D.AlignmentType.CENTER }),
           ], { w: 4513 }),
           cell([
             para(run('Kuasa Pengguna Anggaran', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run(d.kpa.jabatan || 'Direktur RSUD dr. Soeratno Gemolong', { size: 20 }), { align: D.AlignmentType.CENTER }),
-            para(run(''), { before: 600 }),
+            para(run(''), { before: 1200 }),
             para(run(d.kpa.nama || '………………………………', { size: 20 }), { align: D.AlignmentType.CENTER }),
             para(run(nipTxt(d.kpa.nip), { size: 20 }), { align: D.AlignmentType.CENTER }),
           ], { w: 4513 }),
@@ -1511,7 +1518,8 @@ async function baphpDocx(d) {
 function getSpektekData(d) {
   const spk = d.spektek || {};
   const listBrg = (d.items || []).map((it) => `${it.jenis_barang} (${it.kuantitas} ${it.satuan || 'Unit'})`).join(', ');
-  const namaPaket = spk.paket_pengadaan || d.rek?.uraian || d.t.uraian || 'Pengadaan Barang/Jasa';
+  // PAKET PENGADAAN = nama kode rekening, bukan isian manual
+  const namaPaket = d.rek?.uraian || d.t.uraian || spk.paket_pengadaan || 'Pengadaan Barang/Jasa';
   return {
     paket_pengadaan: namaPaket,
     id_rup: spk.id_rup || '-',
@@ -1560,7 +1568,7 @@ function spektekPdf(d) {
     y += 20;
   };
 
-  const drawTwoColRow = (col1, col2, w1 = 155, bold1 = false) => {
+  const drawTwoColRow = (col1, col2, w1 = 155, bold1 = false, judul2 = false) => {
     const w2 = W - w1;
     doc.font(bold1 ? 'Helvetica-Bold' : 'Helvetica').fontSize(9);
     const h1 = doc.heightOfString(String(col1 || ''), { width: w1 - 12 });
@@ -1577,8 +1585,8 @@ function spektekPdf(d) {
 
     doc.font(bold1 ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).fillColor('#000')
       .text(String(col1 || ''), X0 + 6, y + 5, { width: w1 - 12 });
-    doc.font('Helvetica').fontSize(9)
-      .text(String(col2 || ''), X0 + w1 + 6, y + 5, { width: w2 - 12, align: 'justify' });
+    doc.font(judul2 ? 'Helvetica-Bold' : 'Helvetica').fontSize(9)
+      .text(String(col2 || ''), X0 + w1 + 6, y + 5, { width: w2 - 12, align: judul2 ? 'center' : 'justify' });
     y += rowH;
   };
 
@@ -1610,7 +1618,7 @@ function spektekPdf(d) {
 
   // SPESIFIKASI MUTU/KUALITAS
   drawBoxHeader('SPESIFIKASI MUTU/KUALITAS');
-  drawTwoColRow('Spesifikasi Mutu', 'Uraian Detail', 155, true);
+  drawTwoColRow('Spesifikasi Mutu', 'Uraian Detail', 155, true, true);
   drawTwoColRow('Merek Barang', spk.mutu_merek, 155);
   drawTwoColRow('Standarisasi', spk.mutu_standarisasi, 155);
   drawTwoColRow('Spesifikasi Teknik', spk.mutu_teknis, 155);
@@ -1642,7 +1650,7 @@ function spektekPdf(d) {
     doc.text(`${idx + 1}.`, xJml[0], y + 5, { width: cwJml[0], align: 'center' });
     doc.text(String(it.jenis_barang || ''), xJml[1] + 6, y + 5, { width: cwJml[1] - 12 });
     doc.text(String(it.satuan || 'Unit'), xJml[2], y + 5, { width: cwJml[2], align: 'center' });
-    doc.text(String(it.kuantitas || 1), xJml[3], y + 5, { width: cwJml[3], align: 'center' });
+    doc.text(String(Math.round(Number(it.kuantitas)) || 1), xJml[3], y + 5, { width: cwJml[3], align: 'center' });
     y += hIt;
   }
   y += 8;
@@ -1676,13 +1684,13 @@ function spektekPdf(d) {
   y += hInfo + 16;
 
   // Tanda Tangan PPK
-  checkPage(95);
+  checkPage(125);
   const xSig = 310, wSig = 220;
   doc.font('Helvetica').fontSize(9.5);
   doc.text(`Ditetapkan di Sragen tanggal ${tglIndo(spk.tanggal)}`, xSig, y, { width: wSig, align: 'center' });
   doc.text('Pejabat Pembuat Komitmen', xSig, y + 14, { width: wSig, align: 'center' });
-  doc.font('Helvetica-Bold').text(d.ppkom.nama || '………………………………', xSig, y + 62, { width: wSig, align: 'center', underline: true });
-  doc.font('Helvetica').text(nipTxt(d.ppkom.nip), xSig, y + 75, { width: wSig, align: 'center' });
+  doc.font('Helvetica-Bold').text(d.ppkom.nama || '………………………………', xSig, y + 88, { width: wSig, align: 'center', underline: true });
+  doc.font('Helvetica').text(nipTxt(d.ppkom.nip), xSig, y + 101, { width: wSig, align: 'center' });
 
   return doc;
 }
@@ -1693,12 +1701,12 @@ async function spektekDocx(d) {
   const wL = 3200, wR = W_CONTENT - wL;
   const bdrAll = { t: SOLID, b: SOLID, l: SOLID, r: SOLID };
 
-  const row2Col = (k, v, boldK = false) =>
+  const row2Col = (k, v, boldK = false, judul2 = false) =>
     new D.TableRow({
       children: [
         cell(para(run(k, { size: 19, bold: boldK })), { w: wL, ...bdrAll, mt: 60, mb: 60, ml: 100, mr: 100 }),
         cell(
-          String(v || '').split('\n').map((ln) => para(run(ln, { size: 19 }))),
+          String(v || '').split('\n').map((ln) => para(run(ln, { size: 19, bold: judul2 }), judul2 ? { align: D.AlignmentType.CENTER } : {})),
           { w: wR, ...bdrAll, mt: 60, mb: 60, ml: 100, mr: 100 }
         ),
       ],
@@ -1726,7 +1734,7 @@ async function spektekDocx(d) {
         ],
       }),
       rowHeaderFull('SPESIFIKASI MUTU/KUALITAS'),
-      row2Col('Spesifikasi Mutu', 'Uraian Detail', true),
+      row2Col('Spesifikasi Mutu', 'Uraian Detail', true, true),
       row2Col('Merek Barang', spk.mutu_merek),
       row2Col('Standarisasi', spk.mutu_standarisasi),
       row2Col('Spesifikasi Teknik', spk.mutu_teknis),
@@ -1775,7 +1783,7 @@ async function spektekDocx(d) {
           cell(para(run(`${idx + 1}.`, { size: 19 }), { align: D.AlignmentType.CENTER }), { w: cwJ[0], ...bdrAll }),
           cell(para(run(it.jenis_barang || '', { size: 19 })), { w: cwJ[1], ...bdrAll }),
           cell(para(run(it.satuan || 'Unit', { size: 19 }), { align: D.AlignmentType.CENTER }), { w: cwJ[2], ...bdrAll }),
-          cell(para(run(String(it.kuantitas || 1), { size: 19 }), { align: D.AlignmentType.CENTER }), { w: cwJ[3], ...bdrAll }),
+          cell(para(run(String(Math.round(Number(it.kuantitas)) || 1), { size: 19 }), { align: D.AlignmentType.CENTER }), { w: cwJ[3], ...bdrAll }),
         ],
       })),
     ],
@@ -1792,7 +1800,7 @@ async function spektekDocx(d) {
         tblJumlah,
         para(run(`Ditetapkan di Sragen tanggal ${tglIndo(spk.tanggal)}`, { size: 20 }), { align: D.AlignmentType.RIGHT, before: 240 }),
         para(run('Pejabat Pembuat Komitmen', { size: 20 }), { align: D.AlignmentType.RIGHT }),
-        para(run(''), { before: 500 }),
+        para(run(''), { before: 1200 }),
         para(run(d.ppkom.nama || '………………………………', { size: 20, bold: true, underline: true }), { align: D.AlignmentType.RIGHT }),
         para(run(nipTxt(d.ppkom.nip), { size: 20 }), { align: D.AlignmentType.RIGHT }),
       ],
@@ -1857,8 +1865,8 @@ function hpsPdf(d) {
   doc.text('Untuk dan atas nama', xSig, y, { width: wSig, align: 'center' });
   doc.text('RSUD dr. Soeratno Gemolong', xSig, y + 14, { width: wSig, align: 'center' });
   doc.text('Pejabat Pembuat Komitmen', xSig, y + 28, { width: wSig, align: 'center' });
-  doc.font('Helvetica-Bold').text(d.ppkom.nama || '………………………………', xSig, y + 82, { width: wSig, align: 'center', underline: true });
-  doc.font('Helvetica').text(nipTxt(d.ppkom.nip), xSig, y + 96, { width: wSig, align: 'center' });
+  doc.font('Helvetica-Bold').text(d.ppkom.nama || '………………………………', xSig, y + 106, { width: wSig, align: 'center', underline: true });
+  doc.font('Helvetica').text(nipTxt(d.ppkom.nip), xSig, y + 120, { width: wSig, align: 'center' });
 
   // Halaman 2: Lampiran HPS
   doc.addPage({ size: [595.28, 935.43], margin: 0 });
@@ -1955,8 +1963,8 @@ function hpsPdf(d) {
   doc.text('Pejabat Pembuat Komitmen', xSig, y, { width: wSig, align: 'center' });
   doc.text('RSUD dr. Soeratno Gemolong', xSig, y + 14, { width: wSig, align: 'center' });
   doc.text('Kabupaten Sragen', xSig, y + 28, { width: wSig, align: 'center' });
-  doc.font('Helvetica-Bold').text(d.ppkom.nama || '………………………………', xSig, y + 80, { width: wSig, align: 'center', underline: true });
-  doc.font('Helvetica').text(nipTxt(d.ppkom.nip), xSig, y + 94, { width: wSig, align: 'center' });
+  doc.font('Helvetica-Bold').text(d.ppkom.nama || '………………………………', xSig, y + 106, { width: wSig, align: 'center', underline: true });
+  doc.font('Helvetica').text(nipTxt(d.ppkom.nip), xSig, y + 120, { width: wSig, align: 'center' });
 
   return doc;
 }
@@ -2037,7 +2045,7 @@ async function hpsDocx(d) {
           para(run('Untuk dan atas nama', { size: 20 }), { align: D.AlignmentType.RIGHT }),
           para(run('RSUD dr. Soeratno Gemolong', { size: 20 }), { align: D.AlignmentType.RIGHT }),
           para(run('Pejabat Pembuat Komitmen', { size: 20 }), { align: D.AlignmentType.RIGHT }),
-          para(run(''), { before: 560 }),
+          para(run(''), { before: 1200 }),
           para(run(d.ppkom.nama || '………………………………', { size: 20, bold: true, underline: true }), { align: D.AlignmentType.RIGHT }),
           para(run(nipTxt(d.ppkom.nip), { size: 20 }), { align: D.AlignmentType.RIGHT }),
         ],
@@ -2056,7 +2064,7 @@ async function hpsDocx(d) {
           para(run('Pejabat Pembuat Komitmen', { size: 20 }), { align: D.AlignmentType.RIGHT, before: 260 }),
           para(run('RSUD dr. Soeratno Gemolong', { size: 20 }), { align: D.AlignmentType.RIGHT }),
           para(run('Kabupaten Sragen', { size: 20 }), { align: D.AlignmentType.RIGHT }),
-          para(run(''), { before: 560 }),
+          para(run(''), { before: 1200 }),
           para(run(d.ppkom.nama || '………………………………', { size: 20, bold: true, underline: true }), { align: D.AlignmentType.RIGHT }),
           para(run(nipTxt(d.ppkom.nip), { size: 20 }), { align: D.AlignmentType.RIGHT }),
         ],
@@ -2238,6 +2246,20 @@ function baknPdf(d) {
   seg(X[1], y, X[1], y + hTb);
   seg(X[8], y, X[8], y + hTb);
   doc.text(tbNego, X[1] + 3, y + 5, { width: wFull - CW[0] - 8 });
+  y += hTb + 26;
+
+  // Tanda tangan di lampiran, sama seperti pada Berita Acara
+  if (y + 130 > doc.page.height - 40) { doc.addPage(); y = 50; }
+  const wKol = wFull / 2;
+  doc.font('Helvetica').fontSize(10).fillColor('#000');
+  doc.text('RSUD dr. Soeratno Gemolong', xLeft, y, { width: wKol, align: 'center' });
+  doc.text('Pejabat Pengadaan', xLeft, y + 14, { width: wKol, align: 'center' });
+  doc.text(namaPenyedia, xLeft + wKol, y, { width: wKol, align: 'center' });
+  doc.text('Penyedia Barang/Jasa', xLeft + wKol, y + 14, { width: wKol, align: 'center' });
+  doc.font('Helvetica').text(d.pengadaan.nama || '………………………………', xLeft, y + 84, { width: wKol, align: 'center', underline: true });
+  doc.font('Helvetica').text(nipTxt(d.pengadaan.nip), xLeft, y + 98, { width: wKol, align: 'center' });
+  doc.font('Helvetica').text(d.t.penyedia_pimpinan || '………………………………', xLeft + wKol, y + 84, { width: wKol, align: 'center', underline: true });
+  doc.font('Helvetica').text(d.t.penyedia_jabatan || 'Direktur', xLeft + wKol, y + 98, { width: wKol, align: 'center' });
 
   return doc;
 }
@@ -2344,6 +2366,30 @@ async function baknDocx(d) {
           para(run(`Nomor\t: ${noBakn}`, { size: 20 })),
           para(run(`Tanggal\t: ${tglIndo(tglBakn)}`, { size: 20 }), { after: 140 }),
           tblLampiran,
+          para(run(''), { before: 300 }),
+          new D.Table({
+            width: { size: 9026, type: D.WidthType.DXA },
+            columnWidths: [4513, 4513],
+            borders: { ...NOBORDER, insideHorizontal: NONE, insideVertical: NONE },
+            rows: [new D.TableRow({
+              children: [
+                cell([
+                  para(run('RSUD dr. Soeratno Gemolong', { size: 20 }), { align: D.AlignmentType.CENTER }),
+                  para(run('Pejabat Pengadaan', { size: 20 }), { align: D.AlignmentType.CENTER }),
+                  para(run(''), { before: 1200 }),
+                  para(run(d.pengadaan.nama || '………………………………', { size: 20, underline: true }), { align: D.AlignmentType.CENTER }),
+                  para(run(nipTxt(d.pengadaan.nip), { size: 20 }), { align: D.AlignmentType.CENTER }),
+                ], { w: 4513 }),
+                cell([
+                  para(run(namaPenyedia, { size: 20 }), { align: D.AlignmentType.CENTER }),
+                  para(run('Penyedia Barang/Jasa', { size: 20 }), { align: D.AlignmentType.CENTER }),
+                  para(run(''), { before: 1200 }),
+                  para(run(d.t.penyedia_pimpinan || '………………………………', { size: 20, underline: true }), { align: D.AlignmentType.CENTER }),
+                  para(run(d.t.penyedia_jabatan || 'Direktur', { size: 20 }), { align: D.AlignmentType.CENTER }),
+                ], { w: 4513 }),
+              ],
+            })],
+          }),
         ],
       },
     ],
@@ -2397,6 +2443,14 @@ const LABEL_DOK_0_10 = {
   verifikasi: '5. LEMBAR VERIFIKASI',
 };
 
+// alur 0–2 jt: tanpa BAST
+const LABEL_DOK_0_2 = {
+  sp: '1. SURAT PESANAN',
+  baphp: '2. BAPHP',
+  a2: '3. A2',
+  verifikasi: '4. LEMBAR VERIFIKASI',
+};
+
 const LABEL_DOK_LANGSUNG = {
   a2: '1. A2',
   verifikasi: '2. LEMBAR VERIFIKASI',
@@ -2409,7 +2463,10 @@ async function buatDokumen(id, jenis, format) {
   const isLangsung = d.t.tahap === 'spj_langsung';
   const is50750 = !isLangsung && (d.t.mode_pengadaan === '50_750' || ['undangan', 'evaluasi', 'penetapan', 'kontrak'].includes(d.t.tahap));
   const is1050 = !isLangsung && !is50750 && (d.t.mode_pengadaan === '10_50' || ['spektek', 'hps', 'spektek_hps', 'negosiasi'].includes(d.t.tahap) || !!d.t.hps_nomor);
-  const mapLabel = is50750 ? LABEL_DOK_50_750 : (isLangsung ? LABEL_DOK_LANGSUNG : is1050 ? LABEL_DOK_10_50 : LABEL_DOK_0_10);
+  const is02 = !isLangsung && !is50750 && !is1050 && d.t.mode_pengadaan === '0_10' && Number(d.t.kotor) > 0 && Number(d.t.kotor) <= 2000000;
+  // alur 50–750 jt: dari Undangan PL sampai SPK, nama/uraian paket diambil dari Lingkup pekerjaan (langkah Undangan)
+  if (is50750 && d.pl?.lingkup_pekerjaan && !['spektek', 'hps', 'bast', 'baphp', 'a2', 'verifikasi'].includes(jenis)) d.t.uraian = d.pl.lingkup_pekerjaan;
+  const mapLabel = is50750 ? LABEL_DOK_50_750 : (isLangsung ? LABEL_DOK_LANGSUNG : is1050 ? LABEL_DOK_10_50 : is02 ? LABEL_DOK_0_2 : LABEL_DOK_0_10);
   const prefix = mapLabel[jenis] || LABEL_DOK_50_750[jenis] || LABEL_DOK_10_50[jenis] || jenis.toUpperCase();
   const nama = prefix + ' - ' + ((d.t.penyedia && d.t.penyedia !== '-') ? d.t.penyedia : (d.rek?.uraian || 'Paket')).replace(/[\\/:*?"<>|\n]/g, ' ').trim().slice(0, 70);
   let buffer;

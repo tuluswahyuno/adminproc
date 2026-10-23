@@ -438,6 +438,7 @@ export default function TransaksiForm() {
   const [spekTab, setSpekTab] = useState('barang')
   const [standarSubTab, setStandarSubTab] = useState('mutu')
   const [isLebarSpektek, setIsLebarSpektek] = useState(false)
+  const [hint02, setHint02] = useState(searchParams.get('mode') === '0_2')
 
   const isLangsung = f.tahap === 'spj_langsung' || step === 3
   const is50750 = !isLangsung && (f.mode_pengadaan === '50_750' || [20, 21, 22, 23].includes(step))
@@ -580,9 +581,10 @@ export default function TransaksiForm() {
       const baknNomor = t.bakn_nomor || (baknUrut ? `000.3.2/${baknUrut}/05.1.2/${nomor.tahun}` : '')
       const spkUrut = isPlLoaded ? (t.spk_no_urut || parsedPl.spk_no_urut || nomor.nextSpk || '2673') : ''
       const spkNomor = isPlLoaded ? (t.spk_nomor || parsedPl.spk_nomor || `000.3.2/${spkUrut}/05.1.2/${nomor.tahun}`) : ''
-      const bastUrut = t.bast_no_urut || (wantTerima ? nomor.nextBast : '')
+      const t02 = t.mode_pengadaan === '0_10' && Number(t.kotor) > 0 && Number(t.kotor) <= 2000000
+      const bastUrut = t02 ? '' : (t.bast_no_urut || (wantTerima ? nomor.nextBast : ''))
       const bastNomor = t.bast_nomor || (bastUrut ? `000.3.2/${bastUrut}/05.1.2/${nomor.tahun}` : '')
-      const baphpUrut = t.baphp_no_urut || (wantTerima ? `${bastUrut || nomor.nextBast}.a` : '')
+      const baphpUrut = t.baphp_no_urut || (wantTerima ? (t02 ? nomor.nextBast : `${bastUrut || nomor.nextBast}.a`) : '')
       const baphpNomor = t.baphp_nomor || (baphpUrut ? `000.3.2/${baphpUrut}/05.1.2/${nomor.tahun}` : '')
       const defaultPengurusId = t.pengurus_barang_id || s.pengurus_barang_id || pList.find((x) => x.peran === 'PENGURUS_BARANG' && x.aktif)?.id || ''
 
@@ -659,7 +661,9 @@ export default function TransaksiForm() {
     }
   })
 
-  const ubahKategoriAlur = (targetMode) => {
+  const ubahKategoriAlur = (modeDipilih) => {
+    let targetMode = modeDipilih
+    if (modeDipilih === '0_2' || modeDipilih === '2_10') { setHint02(modeDipilih === '0_2'); targetMode = '0_10' }
     if (targetMode === 'langsung') {
       setF((x) => ({
         ...x,
@@ -1035,15 +1039,15 @@ export default function TransaksiForm() {
     } else if (modeId === 2) {
       setF((x) => {
         const urutSp = x.sp_no_urut || nextNomor.nextSp || '1607'
-        const urutBast = x.bast_no_urut || nextNomor.nextBast || '1631'
-        const urutBaphp = x.baphp_no_urut || `${urutBast}.a`
+        const urutBast = is02 ? '' : (x.bast_no_urut || nextNomor.nextBast || '1631')
+        const urutBaphp = x.baphp_no_urut || (is02 ? (nextNomor.nextBast || '1631') : `${urutBast}.a`)
         return {
           ...x,
           tahap: 'selesai',
           sp_no_urut: urutSp,
           sp_nomor: x.sp_nomor || `000.3.2/${urutSp}/05.1.2/${tahunBerjalan}`,
           bast_no_urut: urutBast,
-          bast_nomor: `000.3.2/${urutBast}/05.1.2/${tahunBerjalan}`,
+          bast_nomor: urutBast ? `000.3.2/${urutBast}/05.1.2/${tahunBerjalan}` : '',
           bast_tanggal: x.bast_tanggal || hariIni(),
           baphp_no_urut: urutBaphp,
           baphp_nomor: `000.3.2/${urutBaphp}/05.1.2/${tahunBerjalan}`,
@@ -1291,6 +1295,8 @@ export default function TransaksiForm() {
   }
 
   const nominalEfektif = step === 3 ? (Number(f.kotor) || 0) : (Number(f.kotor) || totalItems || totalHpsItems)
+  // alur 0–2 jt: SP, BAPHP, A2, Verifikasi (tanpa BAST); alur 2–10 jt: SP, BAST, BAPHP, A2, Verifikasi
+  const is02 = !isLangsung && !is1050 && !is50750 && (nominalEfektif > 0 ? nominalEfektif <= 2000000 : hint02)
   const pajak = useMemo(
     () => hitungPajak({ kotor: nominalEfektif, ppn: f.ppn_aktif, pph: f.pph_aktif, ppnTarif: +f.ppn_tarif, pphTarif: +f.pph_tarif }),
     [nominalEfektif, f.ppn_aktif, f.pph_aktif, f.ppn_tarif, f.pph_tarif]
@@ -1302,7 +1308,7 @@ export default function TransaksiForm() {
     setErr(''); setBusy(true)
     try {
       const isLangsung = targetTahap === 'spj_langsung' || step === 3
-      const curMode = isLangsung ? '0_10' : (is50750 ? '50_750' : (is1050 ? '10_50' : '0_10'))
+      const curMode = isLangsung ? '0_10' : (is50750 ? '50_750' : (is1050 ? '10_50' : (is02 ? '0_2' : '0_10')))
       const urutHps = (!isLangsung && (is50750 || is1050)) ? (f.hps_no_urut || nextNomor.nextHps || '1286') : ''
       const nomorHps = (!isLangsung && (is50750 || is1050)) ? (f.hps_nomor || `000.3.2/${urutHps}/05.1.2/${tahunBerjalan}`) : ''
       const urutSp = (isLangsung || is50750) ? '' : (f.sp_no_urut || nextNomor.nextSp || '1607')
@@ -1311,13 +1317,15 @@ export default function TransaksiForm() {
       const nomorBakn = (!isLangsung && (is50750 || is1050)) ? (f.bakn_nomor || `000.3.2/${urutBakn}/05.1.2/${tahunBerjalan}`) : ''
       const urutSpk = (!isLangsung && is50750) ? (f.spk_no_urut || f.pl?.spk_no_urut || nextNomor.nextSpk || '2673') : ''
       const nomorSpk = (!isLangsung && is50750) ? (f.spk_nomor || f.pl?.spk_nomor || `000.3.2/${urutSpk}/05.1.2/${tahunBerjalan}`) : ''
-      const urutBast = targetTahap === 'selesai' ? (f.bast_no_urut || nextNomor.nextBast || '1631') : ''
-      const nomorBast = targetTahap === 'selesai' ? (f.bast_nomor || `000.3.2/${urutBast}/05.1.2/${tahunBerjalan}`) : ''
-      const urutBaphp = targetTahap === 'selesai' ? (f.baphp_no_urut || `${urutBast}.a`) : ''
+      const urutBast = targetTahap === 'selesai' && !is02 ? (f.bast_no_urut || nextNomor.nextBast || '1631') : ''
+      const nomorBast = targetTahap === 'selesai' && !is02 ? (f.bast_nomor || `000.3.2/${urutBast}/05.1.2/${tahunBerjalan}`) : ''
+      const urutBaphp = targetTahap === 'selesai' ? (f.baphp_no_urut || (is02 ? (nextNomor.nextBast || '1631') : `${urutBast}.a`)) : ''
       const nomorBaphp = targetTahap === 'selesai' ? (f.baphp_nomor || `000.3.2/${urutBaphp}/05.1.2/${tahunBerjalan}`) : ''
 
       const body = {
         ...f,
+        // tanggal A2 = tanggal saat dicetak/disimpan
+        tanggal: targetTahap === 'selesai' || targetTahap === 'spj_langsung' ? hariIni() : f.tanggal,
         mode_pengadaan: curMode,
         tahap: targetTahap,
         hps_no_urut: urutHps,
@@ -1394,7 +1402,7 @@ export default function TransaksiForm() {
       )
       setTimeout(() => setOk(''), 2500)
       if (openPreviewJenis && targetId) {
-        setPreview({ id: targetId, jenis: openPreviewJenis, tahap: targetTahap, modePengadaan: curMode })
+        setPreview({ id: targetId, jenis: openPreviewJenis, tahap: targetTahap, modePengadaan: is02 ? '0_2' : curMode })
       }
     } catch (er) {
       setErr(er.message)
@@ -1461,7 +1469,7 @@ export default function TransaksiForm() {
     [penyediaList]
   )
 
-  const activeSteps = is50750 ? STEPS_50_750 : (is1050 ? STEPS_10_50 : (isLangsung ? STEPS_LANGSUNG : STEPS_0_10))
+  const activeSteps = is50750 ? STEPS_50_750 : (is1050 ? STEPS_10_50 : (isLangsung ? STEPS_LANGSUNG : STEPS_0_10.map((st) => (is02 && st.id === 2 ? { ...st, title: '2. Penerimaan Barang (BAPHP, A2 & Verifikasi)' } : st))))
   const spk = f.spektek || defaultSpektek(rek?.uraian, f.items)
 
   return (
@@ -1471,7 +1479,7 @@ export default function TransaksiForm() {
           <ArrowLeft size={15} /> Kembali ke Daftar Pengadaan &amp; SPJ
         </button>
 
-        {/* Pemilih Alur Kategori Pengadaan: Langsung vs 0–10 Jt vs 10–50 Jt vs 50–750 Jt */}
+        {/* Pemilih alur: A2 saja, 0–2 jt, atau 2–10 jt. Alur 10–50 jt & 50–750 jt ada di menu Dokumen Pengadaan (wizard) */}
         <div className="inline-flex flex-wrap items-center gap-1 rounded-full border-2 border-[#122922] bg-white p-1 shadow-[3px_3px_0_#122922]">
           <button
             type="button"
@@ -1480,34 +1488,25 @@ export default function TransaksiForm() {
               isLangsung ? 'bg-[#b5e8a5] text-[#122922] border border-[#122922]' : 'text-[#122922]/65 hover:text-[#122922]'
             }`}
           >
-            A2 &amp; Verifikasi Saja (0–2 Jt)
+            A2 &amp; Verifikasi Saja
           </button>
           <button
             type="button"
-            onClick={() => ubahKategoriAlur('0_10')}
+            onClick={() => ubahKategoriAlur('0_2')}
             className={`rounded-full px-3.5 py-1 text-xs font-extrabold transition cursor-pointer ${
-              !is1050 && !is50750 && !isLangsung ? 'bg-[#d6ee30] text-[#122922] border border-[#122922]' : 'text-[#122922]/65 hover:text-[#122922]'
+              is02 ? 'bg-[#d6ee30] text-[#122922] border border-[#122922]' : 'text-[#122922]/65 hover:text-[#122922]'
             }`}
           >
-            Alur SPJ 0–10 Jt (SP &amp; BAST)
+            Alur 0–2 Jt (SP · BAPHP)
           </button>
           <button
             type="button"
-            onClick={() => ubahKategoriAlur('10_50')}
+            onClick={() => ubahKategoriAlur('2_10')}
             className={`rounded-full px-3.5 py-1 text-xs font-extrabold transition cursor-pointer ${
-              is1050 ? 'bg-[#d6ee30] text-[#122922] border border-[#122922]' : 'text-[#122922]/65 hover:text-[#122922]'
+              !is02 && !isLangsung && !is1050 && !is50750 ? 'bg-[#d6ee30] text-[#122922] border border-[#122922]' : 'text-[#122922]/65 hover:text-[#122922]'
             }`}
           >
-            Alur SPJ 10–50 Jt
-          </button>
-          <button
-            type="button"
-            onClick={() => ubahKategoriAlur('50_750')}
-            className={`rounded-full px-3.5 py-1 text-xs font-extrabold transition cursor-pointer ${
-              is50750 ? 'bg-[#d6ee30] text-[#122922] border border-[#122922]' : 'text-[#122922]/65 hover:text-[#122922]'
-            }`}
-          >
-            Alur SPJ 50–750 Jt (PL · SPK)
+            Alur 2–10 Jt (SP · BAST · BAPHP)
           </button>
         </div>
       </div>
@@ -1520,7 +1519,7 @@ export default function TransaksiForm() {
             ? 'Alur Pengadaan Langsung 50–750 Juta (8 Tahap Lengkap)'
             : is1050
             ? 'Alur Pengadaan 10–50 Juta (5 Tahap Terstruktur)'
-            : 'Alur Pengadaan 0–10 Juta (2 Tahap)'
+            : is02 ? 'Alur Pengadaan 0–2 Juta (SP · BAPHP · A2 · Verifikasi)' : 'Alur Pengadaan 2–10 Juta (SP · BAST · BAPHP · A2 · Verifikasi)'
         }
         title={
           step === 10
@@ -1540,7 +1539,7 @@ export default function TransaksiForm() {
             : step === 1
             ? (saved ? 'Kelola & Cetak Surat Pesanan (SP)' : 'Buat Surat Pesanan (SP) Baru')
             : step === 2
-            ? (is50750 ? 'Tahap 8 (50–750 Jt): Penerimaan Barang (BAST, BAPHP, A2 & Verifikasi)' : 'Penerimaan Barang (BAST, BAPHP, A2 & Verifikasi)')
+            ? (is50750 ? 'Tahap 8 (50–750 Jt): Penerimaan Barang (BAST, BAPHP, A2 & Verifikasi)' : (is02 ? 'Penerimaan Barang (BAPHP, A2 & Verifikasi)' : 'Penerimaan Barang (BAST, BAPHP, A2 & Verifikasi)'))
             : 'SPJ Langsung: Buat Bukti A2 & Lembar Verifikasi Saja'
         }
         desc={
@@ -1553,7 +1552,7 @@ export default function TransaksiForm() {
             : 'Buat & cetak Surat Pesanan (SP) terlebih dahulu → Setelah barang diterima, lanjutkan pembuatan BAST, BAPHP, A2, dan Lembar Verifikasi'
         }
       >
-        {saved && <CetakMenu id={saved} tahap={f.tahap} modePengadaan={is50750 ? '50_750' : (is1050 ? '10_50' : '0_10')} onPreview={setPreview} />}
+        {saved && <CetakMenu id={saved} tahap={f.tahap} modePengadaan={is50750 ? '50_750' : (is1050 ? '10_50' : (is02 ? '0_2' : '0_10'))} onPreview={setPreview} />}
       </PageHeader>
 
       {/* Stepper Kartu Alur */}
@@ -1608,12 +1607,6 @@ export default function TransaksiForm() {
                     : 'Pilih Kode Rekening / Nomor RBA yang Diampu'}
                 </h2>
               </div>
-              {step !== 3 && (
-                <button type="button" onClick={isiContohPdf} className="btn-ghost !py-1 !px-2.5 text-[11px]">
-                  <Sparkles size={13} className="text-[#3f8f77]" />
-                  {is50750 ? 'Isi Contoh Data 50–750 Jt (AC Split & Floor)' : is1050 ? 'Isi Contoh Data 10–50 Jt (PC & Printer)' : 'Isi Contoh Data PDF (CV. Surya Globe)'}
-                </button>
-              )}
             </div>
 
             <Field
@@ -3399,23 +3392,6 @@ export default function TransaksiForm() {
                   </Field>
                 </div>
 
-                {/* Pejabat Pengadaan */}
-                <div className="grid gap-4 sm:grid-cols-2 items-end">
-                  <div>
-                    {pilPejabat('PENGADAAN', 'pengadaan_id', 'Pejabat Pengadaan (Penandatangan Surat Pesanan)')}
-                  </div>
-                  <div className="rounded-xl border border-[#122922]/15 bg-[#b5e8a5]/35 p-3 text-xs text-[#122922]">
-                    <div className="flex items-center gap-1.5 font-extrabold">
-                      <UserCheck size={15} className="text-[#1d5a42]" />
-                      {user?.role === 'pejabat_pengadaan'
-                        ? `Login Aktif: ${user.nama} (Pejabat Pengadaan)`
-                        : 'Otomatis sesuai Role Pejabat Pengadaan / Rekening'}
-                    </div>
-                    <p className="mt-0.5 text-[11px] text-[#122922]/70">
-                      Jika pengguna login dengan role <b>Pejabat Pengadaan</b>, kolom ini otomatis terisi namanya.
-                    </p>
-                  </div>
-                </div>
               </div>
 
               {/* Tabel Item Barang */}
@@ -3531,8 +3507,8 @@ export default function TransaksiForm() {
           {/* ==================== TAHAP SERAH TERIMA (BAST + BAPHP + A2 + VERIFIKASI) ==================== */}
           {step === 2 && (
             <div className="space-y-6">
-              {/* Bagian A: BAST (Penyedia -> PPK) */}
-              <div className="card space-y-4 p-5">
+              {/* Bagian A: BAST (Penyedia -> PPK); tidak dipakai pada alur 0–2 jt */}
+              {!is02 && (<div className="card space-y-4 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#122922]/10 pb-3">
                   <div>
                     <span className="font-mono text-[11px] font-bold uppercase text-[#3f8f77]">Dokumen Serah Terima (Penyedia → PPK)</span>
@@ -3579,66 +3555,7 @@ export default function TransaksiForm() {
                   </Field>
                 </div>
 
-                {f.bast_tanggal && (
-                  <div className="rounded-xl border border-[#122922]/15 bg-[#f6db5b]/40 px-4 py-2.5 text-xs font-medium text-[#122922] space-y-1">
-                    <div><b>Kalimat Pembuka BAST:</b> “{kalimatTanggalBast(f.bast_tanggal)} yang bertanda tangan dibawah ini :”</div>
-                    <div>
-                      <b>Kalimat Isi BAST:</b> “Dengan ini Pihak Penyedia telah menyerahkan Hasil Pekerjaan untuk Paket Pekerjaan{' '}
-                      <u className="font-extrabold">
-                        {rek?.uraian || '(Pilih Kode Rekening)'}
-                        {f.uraian ? ` (${f.uraian})` : ' (isi Yaitu untuk pembayaran di atas)'}
-                      </u>{' '}
-                      berdasarkan {is50750 ? 'Surat Perintah Kerja (SPK)' : 'Surat Pesanan (SP)'} Nomor : <span className="font-mono font-bold">{is50750 ? (f.spk_nomor || '—') : (f.sp_nomor || '—')}</span>…”
-                    </div>
-                  </div>
-                )}
-
-                <div className="rounded-2xl border border-[#122922]/15 bg-[#f7f5ef]/70 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[11px] font-extrabold uppercase text-[#3f8f77]">
-                      {is50750 ? 'I. Dari Pihak Penyedia (Otomatis dari Kontrak SPK)' : 'I. Dari Pihak Penyedia (Otomatis dari Surat Pesanan)'}
-                    </span>
-                    <button type="button" onClick={() => pilihModeStep(is50750 ? 23 : 1)} className="text-xs font-bold text-[#1d5a42] underline">
-                      {is50750 ? 'Ubah di SPK' : 'Ubah di SP'}
-                    </button>
-                  </div>
-                  <div className="grid gap-2 text-xs sm:grid-cols-2">
-                    <div><span className="text-[#122922]/55">Penyedia:</span> <b>{f.penyedia || '—'}</b></div>
-                    <div><span className="text-[#122922]/55">{is50750 ? 'Dasar Nomor SPK:' : 'Dasar Nomor SP:'}</span> <b className="font-mono">{is50750 ? (f.spk_nomor || '—') : (f.sp_nomor || '—')}</b></div>
-                    <div><span className="text-[#122922]/55">Nama & Jabatan:</span> <b>{f.penyedia_pimpinan || '—'} ({f.penyedia_jabatan || 'Direktur'})</b></div>
-                    <div><span className="text-[#122922]/55">Alamat:</span> <b>{f.penyedia_alamat || '—'}</b></div>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-[#122922]/15 bg-white p-4 space-y-3.5">
-                  <div className="font-mono text-[11px] font-extrabold uppercase text-[#122922]">
-                    II. Dari Pihak Pejabat Pembuat Komitmen ( PPK )
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {pilPejabat('PPKOM', 'ppkom_id', 'Nama PPK')}
-                    <Field label="Jabatan PPK">
-                      <input
-                        className="input"
-                        value={f.ppk_jabatan}
-                        onChange={(e) => upd('ppk_jabatan', e.target.value)}
-                        placeholder="mis. Kepala Seksi Informasi dan Pemasaran"
-                      />
-                    </Field>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Alamat PPK">
-                      <input
-                        className="input"
-                        value={f.ppk_alamat}
-                        onChange={(e) => upd('ppk_alamat', e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Nomor RBA (Otomatis dari Kode Rekening)">
-                      <input className="input font-mono" disabled value={rek?.kode || 'Pilih kode rekening di atas'} />
-                    </Field>
-                  </div>
-                </div>
-              </div>
+              </div>)}
 
               {/* Bagian B: BAPHP (PPK -> Kuasa Pengguna Anggaran / Direktur) */}
               <div className="card space-y-4 p-5">
@@ -3646,11 +3563,11 @@ export default function TransaksiForm() {
                   <div>
                     <span className="font-mono text-[11px] font-bold uppercase text-[#4c3f91]">Dokumen Penyerahan PPK → Kuasa Pengguna Anggaran</span>
                     <h2 className="text-base font-extrabold text-[#122922]">
-                      {is50750 ? '15. BERITA ACARA PENYERAHAN HASIL PEKERJAAN (BAPHP)' : is1050 ? '6. BERITA ACARA PENYERAHAN HASIL PEKERJAAN (BAPHP)' : '3. BERITA ACARA PENYERAHAN HASIL PEKERJAAN (BAPHP)'}
+                      {is50750 ? '15. BERITA ACARA PENYERAHAN HASIL PEKERJAAN (BAPHP)' : is1050 ? '6. BERITA ACARA PENYERAHAN HASIL PEKERJAAN (BAPHP)' : is02 ? '2. BERITA ACARA PENYERAHAN HASIL PEKERJAAN (BAPHP)' : '3. BERITA ACARA PENYERAHAN HASIL PEKERJAAN (BAPHP)'}
                     </h2>
                   </div>
                   <div className="rounded-full border border-[#122922] bg-[#b7aef3] px-3 py-1 font-mono text-xs font-extrabold text-[#122922]">
-                    Nomor : {f.baphp_nomor || `000.3.2/${f.baphp_no_urut || `${f.bast_no_urut || nextNomor.nextBast}.a`}/05.1.2/${tahunBerjalan}`}
+                    Nomor : {f.baphp_nomor || `000.3.2/${f.baphp_no_urut || (is02 ? nextNomor.nextBast : `${f.bast_no_urut || nextNomor.nextBast}.a`)}/05.1.2/${tahunBerjalan}`}
                   </div>
                 </div>
 
@@ -3679,31 +3596,13 @@ export default function TransaksiForm() {
                         setF((x) => ({
                           ...x,
                           baphp_tanggal: v,
-                          baphp_nomor: `000.3.2/${x.baphp_no_urut || `${x.bast_no_urut || nextNomor.nextBast}.a`}/05.1.2/${th}`,
+                          baphp_nomor: `000.3.2/${x.baphp_no_urut || (is02 ? nextNomor.nextBast : `${x.bast_no_urut || nextNomor.nextBast}.a`)}/05.1.2/${th}`,
                         }))
                       }}
                     />
                   </Field>
                 </div>
 
-                {(f.baphp_tanggal || f.bast_tanggal) && (
-                  <div className="rounded-xl border border-[#122922]/15 bg-[#b7aef3]/30 px-4 py-2.5 text-xs font-medium text-[#122922] space-y-1">
-                    <div><b>Kalimat Pembuka BAPHP:</b> “{kalimatTanggalBast(f.baphp_tanggal || f.bast_tanggal)} yang bertanda tangan dibawah ini :”</div>
-                    <div>
-                      <b>Kalimat Penyerahan BAPHP (PPK → KPA):</b> “Dengan ini Pihak PPK telah menyerahkan hasil pekerjaan untuk Paket Pekerjaan{' '}
-                      <u className="font-extrabold">
-                        {rek?.uraian || 'Belanja Modal …'}
-                        {f.uraian ? ` (${f.uraian})` : ' (sesuai isian A2 & verifikasi)'}
-                      </u>{' '}
-                      RSUD dr. Soeratno Gemolong berdasarkan {is50750 ? 'Surat Perintah Kerja (SPK)' : 'Surat Pesanan (SP)'} Nomor : <span className="font-mono font-bold">{is50750 ? (f.spk_nomor || '—') : (f.sp_nomor || '—')}</span> kepada Pihak Kuasa Pengguna Anggaran dalam keadaan baik dengan rincian sebagai berikut :”
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {pilPejabat('KPA', 'kpa_id', 'Pihak II: Kuasa Pengguna Anggaran / Direktur')}
-                  {pilPejabat('PENGURUS_BARANG', 'pengurus_barang_id', 'Pengurus Barang (Tanda Tangan di BAPHP)')}
-                </div>
               </div>
 
               {/* Bagian C: A2 & Lembar Verifikasi */}
@@ -3715,18 +3614,15 @@ export default function TransaksiForm() {
                       ? '16. A2 (SURAT BUKTI PENGELUARAN) & 17. LEMBAR VERIFIKASI'
                       : is1050
                       ? '7. A2 (SURAT BUKTI PENGELUARAN) & 8. LEMBAR VERIFIKASI'
-                      : '4. A2 (SURAT BUKTI PENGELUARAN) & 5. LEMBAR VERIFIKASI'}
+                      : is02 ? '3. A2 (SURAT BUKTI PENGELUARAN) & 4. LEMBAR VERIFIKASI' : '4. A2 (SURAT BUKTI PENGELUARAN) & 5. LEMBAR VERIFIKASI'}
                   </h2>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Tanggal Bukti Pengeluaran (A2)">
-                    <input type="date" className="input" value={f.tanggal} onChange={(e) => upd('tanggal', e.target.value)} />
-                  </Field>
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,22rem)_1fr] sm:items-end">
                   <Field label="Jumlah Kotor / Dibulatkan (Rp)" hint="Otomatis dari jumlah item Surat Pesanan / Negosiasi, bisa disesuaikan">
                     <input
                       inputMode="numeric"
-                      className="input font-mono text-base font-extrabold tabular-nums"
+                      className="input text-right font-mono text-base font-extrabold tabular-nums"
                       value={nominalEfektif ? num(nominalEfektif) : ''}
                       onChange={(e) => upd('kotor', e.target.value.replace(/\D/g, ''))}
                       placeholder="0"
@@ -3761,15 +3657,6 @@ export default function TransaksiForm() {
                   </label>
                 </div>
 
-                <div className="border-t border-[#122922]/10 pt-4 space-y-3">
-                  <div className="text-xs font-extrabold uppercase tracking-wider text-[#122922]">Penandatangan A2 &amp; Lembar Verifikasi</div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {pilPejabat('KPA', 'kpa_id')}
-                    {pilPejabat('PPTK', 'pptk_id')}
-                    {pilPejabat('BENDAHARA', 'bendahara_id')}
-                    {pilPejabat('VERIFIKATOR', 'verifikator_id')}
-                  </div>
-                </div>
               </div>
             </div>
           )}
@@ -3810,14 +3697,11 @@ export default function TransaksiForm() {
                 </Field>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Tanggal Bukti Pengeluaran (A2)">
-                  <input type="date" className="input" value={f.tanggal} onChange={(e) => upd('tanggal', e.target.value)} />
-                </Field>
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,22rem)_1fr] sm:items-end">
                 <Field label="Uang Sejumlah / Nominal Kotor (Rp)">
                   <input
                     inputMode="numeric"
-                    className="input font-mono text-base font-extrabold tabular-nums"
+                    className="input text-right font-mono text-base font-extrabold tabular-nums"
                     value={f.kotor ? num(f.kotor) : ''}
                     onChange={(e) => upd('kotor', e.target.value.replace(/\D/g, ''))}
                     placeholder="0"
@@ -3852,15 +3736,6 @@ export default function TransaksiForm() {
                 </label>
               </div>
 
-              <div className="border-t border-[#122922]/10 pt-4 space-y-3">
-                <div className="text-xs font-extrabold uppercase tracking-wider text-[#122922]">Penandatangan A2 &amp; Lembar Verifikasi</div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {pilPejabat('KPA', 'kpa_id')}
-                  {pilPejabat('PPTK', 'pptk_id')}
-                  {pilPejabat('BENDAHARA', 'bendahara_id')}
-                  {pilPejabat('VERIFIKATOR', 'verifikator_id')}
-                </div>
-              </div>
             </div>
           )}
         </div>
@@ -3907,7 +3782,7 @@ export default function TransaksiForm() {
                     ? 'PL 50–750 Juta (17 Dok)'
                     : is1050
                     ? 'SPJ 10–50 Juta (8 Dok)'
-                    : 'SPJ 0–10 Juta (5 Dok)'}
+                    : (is02 ? 'SPJ 0–2 Juta (4 Dok)' : 'SPJ 2–10 Juta (5 Dok)')}
                 </dd>
               </div>
               {(is50750 || is1050) && step !== 10 && (
@@ -3946,13 +3821,13 @@ export default function TransaksiForm() {
               )}
               {step === 2 && (
                 <>
-                  <div className="flex justify-between">
+                  <div className={`flex justify-between ${is02 ? 'hidden' : ''}`}>
                     <dt className="font-medium text-[#122922]/60">Nomor BAST</dt>
                     <dd className="font-mono font-bold text-[#122922]">{f.bast_nomor || `000.3.2/${f.bast_no_urut || nextNomor.nextBast}/05.1.2/${tahunBerjalan}`}</dd>
                   </div>
                   <div className="flex justify-between">
                     <dt className="font-medium text-[#122922]/60">Nomor BAPHP</dt>
-                    <dd className="font-mono font-bold text-[#4c3f91]">{f.baphp_nomor || `000.3.2/${f.baphp_no_urut || `${f.bast_no_urut || nextNomor.nextBast}.a`}/05.1.2/${tahunBerjalan}`}</dd>
+                    <dd className="font-mono font-bold text-[#4c3f91]">{f.baphp_nomor || `000.3.2/${f.baphp_no_urut || (is02 ? nextNomor.nextBast : `${f.bast_no_urut || nextNomor.nextBast}.a`)}/05.1.2/${tahunBerjalan}`}</dd>
                   </div>
                 </>
               )}
@@ -4315,18 +4190,18 @@ export default function TransaksiForm() {
                   Dokumen Siap Cetak (Urut Otomatis):
                 </div>
                 <div className="grid grid-cols-1 gap-1.5">
-                  {filterDokByTahap(f.tahap, is50750 ? '50_750' : (is1050 ? '10_50' : '0_10')).map((d) => (
+                  {filterDokByTahap(f.tahap, is50750 ? '50_750' : (is1050 ? '10_50' : (is02 ? '0_2' : '0_10'))).map((d) => (
                     <div key={d.jenis} className="flex items-center justify-between rounded-xl border border-[#122922]/20 bg-[#f7f5ef] px-3 py-2 text-xs font-bold text-[#122922]">
                       <button
                         type="button"
-                        onClick={() => setPreview({ id: saved, jenis: d.jenis, tahap: f.tahap, modePengadaan: is50750 ? '50_750' : (is1050 ? '10_50' : '0_10') })}
+                        onClick={() => setPreview({ id: saved, jenis: d.jenis, tahap: f.tahap, modePengadaan: is50750 ? '50_750' : (is1050 ? '10_50' : (is02 ? '0_2' : '0_10')) })}
                         className="flex items-center gap-2 text-left hover:underline"
                       >
                         <span className={`h-2.5 w-2.5 rounded-full border border-[#122922] ${d.badge}`} />
                         {d.label}
                       </button>
                       <div className="flex items-center gap-1">
-                        <button type="button" onClick={() => setPreview({ id: saved, jenis: d.jenis, tahap: f.tahap, modePengadaan: is50750 ? '50_750' : (is1050 ? '10_50' : '0_10') })} className="rounded bg-white px-2 py-0.5 text-[10px] border border-[#122922]/20 hover:bg-[#d6ee30]">
+                        <button type="button" onClick={() => setPreview({ id: saved, jenis: d.jenis, tahap: f.tahap, modePengadaan: is50750 ? '50_750' : (is1050 ? '10_50' : (is02 ? '0_2' : '0_10')) })} className="rounded bg-white px-2 py-0.5 text-[10px] border border-[#122922]/20 hover:bg-[#d6ee30]">
                           Lihat
                         </button>
                         <a href={`/api/transaksi/${saved}/dokumen/${d.jenis}.pdf`} className="rounded bg-white px-2 py-0.5 text-[10px] border border-[#122922]/20 hover:bg-[#d6ee30]">

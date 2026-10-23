@@ -354,6 +354,13 @@ async function migrateSchema() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  // 8. Jalur dokumen mengikuti nilai paket (<= Rp50 jt = 10–50 jt, > Rp50 jt = 50–750 jt); data lama diseragamkan
+  await pool.query(`UPDATE transaksi SET mode_pengadaan='10_50',
+      tahap = CASE tahap WHEN 'undangan' THEN 'hps' WHEN 'evaluasi' THEN 'negosiasi' WHEN 'penetapan' THEN 'negosiasi' WHEN 'kontrak' THEN 'negosiasi' ELSE tahap END
+    WHERE mode_pengadaan='50_750' AND kotor>0 AND kotor<=50000000`);
+  await pool.query(`UPDATE transaksi SET mode_pengadaan='50_750', tahap = CASE tahap WHEN 'pesanan' THEN 'kontrak' ELSE tahap END
+    WHERE mode_pengadaan='10_50' AND kotor>50000000`);
+
   // Peringatan: akun aktif yang masih memakai password umum
   const [semuaUser] = await pool.query(`SELECT username, password_hash FROM users WHERE aktif=1`);
   const lemah = semuaUser

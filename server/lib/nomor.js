@@ -57,9 +57,13 @@ async function daftarNomor(tahun) {
       if (!urut) return;
       items.push({ kunci, sumber: 'dokumen', no_urut: urut, nomor: nomorLengkap(urut, tahun), jenis: label, paket, transaksi_id: t.id, mode: t.mode_pengadaan, tanggal: tanggal || null });
     };
-    for (const d of DOK_KOLOM) tambah(t[`${d.kolom}_no_urut`], d.label, t[`${d.kolom}_tanggal`], `t${t.id}:${d.kolom}`);
+    const alurPl = t.mode_pengadaan === '50_750';
+    for (const d of DOK_KOLOM) {
+      if (d.kolom === 'spk' && !alurPl) continue; // SPK hanya ada di alur 50–750 jt
+      tambah(t[`${d.kolom}_no_urut`], d.label, t[`${d.kolom}_tanggal`], `t${t.id}:${d.kolom}`);
+    }
     let pl = {};
-    if (t.pl_json) { try { pl = JSON.parse(t.pl_json) || {}; } catch { pl = {}; } }
+    if (alurPl && t.pl_json) { try { pl = JSON.parse(t.pl_json) || {}; } catch { pl = {}; } }
     for (const d of DOK_PL) tambah(pl[`${d.kolom}_no_urut`], d.label, pl[`${d.kolom}_tanggal`], `t${t.id}:pl:${d.kolom}`);
   }
   const manual = await db.prepare('SELECT * FROM nomor_manual WHERE tahun=?').all(tahun);

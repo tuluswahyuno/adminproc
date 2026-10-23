@@ -68,6 +68,8 @@ export function filterDokByTahap(tahap, modePengadaan = '0_10') {
       ? DOK_LIST.filter((d) => ['spektek', 'hps', 'bakn', 'sp', 'bast', 'baphp', 'a2', 'verifikasi'].includes(d.jenis))
       : DOK_LIST.filter((d) => ['sp', 'bast', 'baphp', 'a2', 'verifikasi'].includes(d.jenis))
   }
+  // alur 0–2 jt tidak memakai BAST
+  if (modePengadaan === '0_2') raw = raw.filter((d) => d.jenis !== 'bast')
   return raw.map((d, idx) => ({
     ...d,
     urut: idx + 1,
@@ -297,8 +299,11 @@ export default function Transaksi() {
         <Link to="/transaksi/baru?mode=langsung" className="btn-ghost">
           <Receipt size={15} /> A2 & Verifikasi Saja
         </Link>
+        <Link to="/transaksi/baru?mode=0_2" className="btn-ghost !border-[#122922] !bg-[#d6ee30]/60">
+          <Plus size={15} strokeWidth={2.5} /> Paket 0–2 Jt
+        </Link>
         <Link to="/transaksi/baru" className="btn-ghost !border-[#122922] !bg-[#d6ee30]/60">
-          <Plus size={15} strokeWidth={2.5} /> Paket 0–2 Jt & 2–10 Jt (SP)
+          <Plus size={15} strokeWidth={2.5} /> Paket 2–10 Jt
         </Link>
         <Link to="/pengadaan/baru?tier=10_50" className="btn-lime">
           <FileText size={15} /> Paket 10–50 Jt
@@ -398,7 +403,7 @@ export default function Transaksi() {
                   : isKontrak ? 'kontrak'
                   : isSelesai ? 'selesai'
                   : 'pesanan'
-                const modePengadaan = is50750 ? '50_750' : (t.mode_pengadaan || (Number(t.kotor) > 10000000 || t.hps_nomor || t.bakn_nomor ? '10_50' : '0_10'))
+                const modePengadaan = is50750 ? '50_750' : (t.mode_pengadaan === '0_10' && Number(t.kotor) > 0 && Number(t.kotor) <= 2000000 ? '0_2' : t.mode_pengadaan || (Number(t.kotor) > 10000000 || t.hps_nomor || t.bakn_nomor ? '10_50' : '0_10'))
 
                 return (
                   <tr key={t.id} className="transition hover:bg-[#f7f5ef]/70">
@@ -423,7 +428,7 @@ export default function Transaksi() {
                                 <span className="truncate" title={t.bakn_nomor}>BA Nego: {t.bakn_nomor}</span>
                               </div>
                             )}
-                            {t.spk_nomor ? (
+                            {t.spk_nomor && t.mode_pengadaan === '50_750' ? (
                               <div className="flex items-center gap-1 text-[#3f8f77]">
                                 <PackageCheck size={11} className="shrink-0 text-[#3f8f77]" />
                                 <span className="truncate" title={t.spk_nomor}>SPK: {t.spk_nomor}</span>

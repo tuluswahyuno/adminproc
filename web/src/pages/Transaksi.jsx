@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  Download, Eye, FileText, Pencil, Plus, Printer, Search, Trash2,
+  Download, Eye, FileText, ShoppingCart, Pencil, Plus, Printer, Search, Trash2,
   PackageCheck, FileCheck, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, Clock, Receipt, CalendarRange
 } from 'lucide-react'
 import { api, rp, tgl, KATEGORI } from '../lib'
@@ -22,6 +22,7 @@ const DOK_LIST = [
   { jenis: 'laporan_pl', title: 'LAPORAN HASIL PL KE PPK', desc: 'Laporan Proses Pengadaan Langsung kepada PPK', badge: 'bg-[#b7aef3]' },
   { jenis: 'sppbj', title: 'SPPBJ', desc: 'Surat Penunjukan Penyedia Barang/Jasa (PPK)', badge: 'bg-[#f6db5b]' },
   { jenis: 'spk', title: 'SURAT PERINTAH KERJA (SPK)', desc: 'SPK Kontrak & Lampiran Rincian Barang', badge: 'bg-[#d6ee30]' },
+  { jenis: 'penyerahan_pp', title: 'SURAT PENYERAHAN PEKERJAAN KE PP', desc: 'Penyerahan pekerjaan PPK → Pejabat Pengadaan (E-Purchasing)', badge: 'bg-[#a9dcf0]' },
   { jenis: 'sp', title: 'SURAT PESANAN', desc: 'Pemesanan barang ke penyedia', badge: 'bg-[#d6ee30]' },
   { jenis: 'bast', title: 'BAST HASIL PEKERJAAN', desc: 'Serah terima Penyedia → PPK', badge: 'bg-[#a9dcf0]' },
   { jenis: 'baphp', title: 'BAPHP (PPK → KPA)', desc: 'Penyerahan hasil pekerjaan PPK → KPA', badge: 'bg-[#b7aef3]' },
@@ -29,12 +30,24 @@ const DOK_LIST = [
   { jenis: 'verifikasi', title: 'LEMBAR VERIFIKASI', desc: 'Lembar kendali verifikator', badge: 'bg-[#f6db5b]' },
 ]
 
+// E-Purchasing: dokumen HPS hanya untuk nilai di atas Rp100 juta; mode 'epur_nohps' dipakai untuk memilih daftar dokumen
+export const epurPakaiHps = (nilai) => Number(nilai) > 100000000
+export const modeDokumen = (mode, nilaiHps) => (mode === 'epur' && !epurPakaiHps(nilaiHps) ? 'epur_nohps' : mode)
+
 export function filterDokByTahap(tahap, modePengadaan = '0_10') {
+  const epur = modePengadaan === 'epur' || modePengadaan === 'epur_nohps'
   const is50750 = modePengadaan === '50_750' || ['undangan', 'evaluasi', 'penetapan', 'kontrak'].includes(tahap)
   const is1050 = !is50750 && (modePengadaan === '10_50' || ['spektek', 'hps', 'spektek_hps', 'negosiasi'].includes(tahap))
   let raw = []
   if (tahap === 'spj_langsung') {
     raw = DOK_LIST.filter((d) => d.jenis === 'a2' || d.jenis === 'verifikasi')
+  } else if (epur) {
+    const urutEpur = ['spektek', ...(modePengadaan === 'epur' ? ['hps'] : []), 'penyerahan_pp', 'baphp', 'a2', 'verifikasi']
+    let maks = urutEpur.length
+    if (tahap === 'spektek') maks = 1
+    else if (tahap === 'hps' || tahap === 'spektek_hps') maks = modePengadaan === 'epur' ? 2 : 1
+    else if (tahap === 'pesanan') maks = modePengadaan === 'epur' ? 3 : 2
+    raw = urutEpur.slice(0, maks).map((k) => DOK_LIST.find((d) => d.jenis === k)).filter(Boolean)
   } else if (is50750) {
     const plOrder = [
       'spektek', 'hps', 'undangan_pl', 'ba_pembukaan', 'ba_evaluasi',
@@ -177,7 +190,7 @@ export function PreviewModal({ preview, onClose, onSwitch }) {
 }
 
 // paket 10-50 jt dan 50-750 jt dikerjakan di wizard; langkahnya dipilih otomatis
-const linkPaket = (t, mode) => (['10_50', '50_750'].includes(t.mode_pengadaan)
+const linkPaket = (t, mode) => (['10_50', '50_750', 'epur'].includes(t.mode_pengadaan)
   ? `/pengadaan/${t.id}`
   : `/transaksi/${t.id}${mode ? '?mode=' + mode : ''}`)
 
@@ -312,6 +325,9 @@ export default function Transaksi() {
         <Link to="/pengadaan/baru?tier=50_750" className="btn-primary">
           <FileText size={15} /> Paket 50–750 Jt
         </Link>
+        <Link to="/pengadaan/baru?tier=epur" className="btn-ghost !border-[#122922] !bg-[#a9dcf0]/60">
+          <ShoppingCart size={15} /> E-Purchasing
+        </Link>
       </PageHeader>
 
       <div className="card overflow-visible">
@@ -385,6 +401,7 @@ export default function Transaksi() {
             <tbody className="block divide-y divide-[#122922]/10 md:table-row-group">
               {sortedRows?.map((t) => {
                 const isLangsung = t.tahap === 'spj_langsung'
+                const isEpur = !isLangsung && t.mode_pengadaan === 'epur'
                 const is50750 = !isLangsung && (t.mode_pengadaan === '50_750' || ['undangan', 'evaluasi', 'penetapan', 'kontrak'].includes(t.tahap))
                 const isSpektekOnly = t.tahap === 'spektek'
                 const isHpsStage = t.tahap === 'hps' || t.tahap === 'spektek_hps'
@@ -404,7 +421,9 @@ export default function Transaksi() {
                   : isKontrak ? 'kontrak'
                   : isSelesai ? 'selesai'
                   : 'pesanan'
-                const modePengadaan = is50750 ? '50_750' : (t.mode_pengadaan === '0_10' && Number(t.kotor) > 0 && Number(t.kotor) <= 2000000 ? '0_2' : t.mode_pengadaan || (Number(t.kotor) > 10000000 || t.hps_nomor || t.bakn_nomor ? '10_50' : '0_10'))
+                const modeBaris = is50750 ? '50_750' : (t.mode_pengadaan === '0_10' && Number(t.kotor) > 0 && Number(t.kotor) <= 2000000 ? '0_2' : t.mode_pengadaan || (Number(t.kotor) > 10000000 || t.hps_nomor || t.bakn_nomor ? '10_50' : '0_10'))
+
+                const modePengadaan = modeDokumen(modeBaris, t.hps_total || t.kotor)
 
                 return (
                   <tr key={t.id} className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-4 py-3.5 transition hover:bg-[#f7f5ef]/70 md:table-row md:p-0">
@@ -437,7 +456,7 @@ export default function Transaksi() {
                             ) : t.sp_nomor ? (
                               <div className="flex items-center gap-1">
                                 <PackageCheck size={11} className="shrink-0 text-[#3f8f77]" />
-                                <span className="truncate" title={t.sp_nomor}>SP: {t.sp_nomor}</span>
+                                <span className="truncate" title={t.sp_nomor}>{isEpur ? 'Penyerahan' : 'SP'}: {t.sp_nomor}</span>
                               </div>
                             ) : null}
                             {isSelesai && t.bast_nomor && (
@@ -490,6 +509,23 @@ export default function Transaksi() {
                         <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#b5e8a5] px-2.5 py-1 text-[10px] font-extrabold text-[#122922]">
                           <Receipt size={11} /> A2 & Verifikasi
                         </span>
+                      ) : isEpur ? (
+                        <div className="flex flex-col items-center gap-1.5 max-md:items-start">
+                          {isSelesai ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#a9dcf0] px-2.5 py-1 text-[10px] font-extrabold text-[#122922]">
+                              <CheckCircle2 size={11} /> E-Purchasing Selesai
+                            </span>
+                          ) : (
+                            <>
+                              <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#f6db5b] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">
+                                <Clock size={11} /> {t.tahap === 'spektek' ? '1. Spektek / KAK' : t.tahap === 'hps' ? '2. HPS' : '3. Penyerahan ke PP'}
+                              </span>
+                              <Link to={linkPaket(t, '')} className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922] shadow-[1px_1px_0_#122922] hover:bg-[#c8e220]">
+                                {t.tahap === 'spektek' ? '+ Isi HPS →' : t.tahap === 'hps' ? '+ Surat Penyerahan ke PP →' : '+ BAPHP, A2 & Verifikasi →'}
+                              </Link>
+                            </>
+                          )}
+                        </div>
                       ) : isSpektekOnly ? (
                         <div className="flex flex-col items-center gap-1.5 max-md:items-start">
                           <span className="inline-flex items-center gap-1 rounded-full border border-[#122922] bg-[#d6ee30] px-2.5 py-0.5 text-[10px] font-extrabold text-[#122922]">

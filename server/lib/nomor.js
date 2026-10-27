@@ -55,6 +55,7 @@ async function daftarNomor(tahun) {
     const tambah = (urut, label, tanggal, kunci) => {
       urut = String(urut || '').trim();
       if (!urut) return;
+      if (label === 'Surat Pesanan' && t.mode_pengadaan === 'epur') label = 'Surat Penyerahan Pekerjaan ke PP';
       items.push({ kunci, sumber: 'dokumen', no_urut: urut, nomor: nomorLengkap(urut, tahun), jenis: label, paket, transaksi_id: t.id, mode: t.mode_pengadaan, tanggal: tanggal || null });
     };
     const alurPl = t.mode_pengadaan === '50_750';
@@ -94,12 +95,12 @@ async function saranNomor(tahun, acuan, arah) {
 }
 
 // Daftar nomor yang diajukan sebuah paket (kolom transaksi + pl_json bila alur 50–750 jt) untuk diperiksa kembar.
-function entriNomor(kol, pl, alurPl) {
+function entriNomor(kol, pl, alurPl, mode) {
   const out = [];
   for (const d of DOK_KOLOM) {
     if (d.kolom === 'spk' && !alurPl) continue;
     const v = String(kol[d.kolom] || '').trim();
-    if (v) out.push({ kunci: d.kolom, label: d.label, no_urut: v });
+    if (v) out.push({ kunci: d.kolom, label: d.kolom === 'sp' && mode === 'epur' ? 'Surat Penyerahan Pekerjaan ke PP' : d.label, no_urut: v });
   }
   if (alurPl && pl) for (const d of DOK_PL) {
     const v = String(pl[d.kolom + '_no_urut'] || '').trim();

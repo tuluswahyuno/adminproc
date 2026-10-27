@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, ChevronDown, FileCheck2, FileText, Info, Layers, Package, Plus, Receipt, Search, Sparkles, X } from 'lucide-react'
+import { Check, ChevronDown, FileCheck2, FileText, Info, Layers, Package, Plus, Receipt, Search, ShoppingCart, Sparkles, X } from 'lucide-react'
 import Swal from 'sweetalert2'
 import 'sweetalert2/dist/sweetalert2.min.css'
 import { kategoriByKode } from './lib'
@@ -73,6 +73,7 @@ export function BuatDokumenMenu({
     { label: '2–10jt (SP · BAST · BAPHP)', url: '/transaksi/baru', icon: Package },
     { label: '10–50jt', url: '/pengadaan/baru?tier=10_50', icon: FileText },
     { label: '50–750jt', url: '/pengadaan/baru?tier=50_750', icon: Layers },
+    { label: 'E-Purchasing', url: '/pengadaan/baru?tier=epur', icon: ShoppingCart },
   ]
 
   return (

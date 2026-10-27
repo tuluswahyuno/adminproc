@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const D = require('docx');
-const { terbilang, rupiah, tglIndo, tglKalimatBast } = require('./util');
+const { terbilang, rupiah, tglIndo, tglKalimatBast, BATAS_HPS_EPUR } = require('./util');
 
 const ASSET = path.join(__dirname, '..', 'assets');
 const LOGO_RS = fs.readFileSync(path.join(ASSET, 'logo', 'logors.png'));
@@ -1700,7 +1700,112 @@ async function spkDocx(d) {
   return D.Packer.toBuffer(docx);
 }
 
+/* ==========================================================================
+   SURAT PENYERAHAN PEKERJAAN PENGADAAN — E-Purchasing (PPK -> Pejabat Pengadaan)
+   Memakai kolom nomor/tanggal Surat Pesanan (sp_*) karena alur E-Purchasing tidak punya SP.
+   ========================================================================== */
+function teksPenyerahan(d) {
+  const rek = (d.rek?.uraian || '').trim();
+  const paket = (d.t.uraian || '').trim();
+  const nilai = Number(d.hpsTotal) || 0;
+  return {
+    noDoc: d.t.sp_nomor || `000.3.2/${d.t.sp_no_urut || '1607'}/05.1.2/${d.tahun}`,
+    tglDoc: tglIndo(d.t.sp_tanggal || d.t.tanggal),
+    buka: `Dengan hormat kami beritahukan bahwa pada Tahun Anggaran ${d.tahun} Rumah Sakit Umum Daerah dr. Soeratno Gemolong Kabupaten Sragen mempunyai alokasi dana untuk kegiatan :`,
+    kegiatan: `${paket && paket.toLowerCase() !== rek.toLowerCase() ? `${rek} untuk ${paket}` : (rek || paket)} dengan nilai Harga Perkiraan Sendiri sebesar Rp${fmtNum(nilai)},- (${terbilang(nilai)})`,
+    mohon: 'Sehubungan dengan hal tersebut demi kelancaran pelaksanaannya, maka dengan ini kami mohon bantuan Pejabat Pengadaan Barang dan Jasa RSUD dr. Soeratno Gemolong untuk melaksanakan proses pengadaan barang/jasa tersebut.',
+    lampiran: ['Spesifikasi teknis', ...(nilai > BATAS_HPS_EPUR ? ['HPS (Harga Perkiraan Sendiri)'] : [])],
+    tutup: 'Demikian kami sampaikan permohonan kami, mohon ditindaklanjuti dan atas kerja samanya kami ucapkan terima kasih.',
+  };
+}
+
+function penyerahanPpPdf(d) {
+  const doc = new PDFDocument({ size: [595.28, 935.43], margin: 0, info: { Title: 'Surat Penyerahan Pekerjaan Pengadaan' } });
+  const W = doc.page.width, xLeft = 70, wFull = W - 140, xKanan = 315, wKanan = W - 70 - 315;
+  const t = teksPenyerahan(d);
+  let y = drawKop(doc, d.s, 32) + 10;
+
+  doc.font('Helvetica').fontSize(10.5);
+  doc.text(`Gemolong, ${t.tglDoc}`, 350, y); y += 20;
+  for (const [k, v] of [['Nomor', t.noDoc], ['Lamp', '1 bendel'], ['Hal', 'Penyerahan Pekerjaan Pengadaan']]) {
+    doc.text(k, xLeft, y); doc.text(': ' + v, xLeft + 55, y); y += 14;
+  }
+  y += 14;
+  for (const baris of ['Kepada,', 'Yth . Pejabat Pengadaan Barang dan Jasa RSUD', 'dr. Soeratno Gemolong', 'di –']) { doc.text(baris, xKanan, y); y += 12.5; }
+  doc.text('G E M O L O N G', xKanan + 25, y); y += 28;
+
+  doc.text(t.buka, xLeft, y, { width: wFull, align: 'justify', lineGap: 2.5, indent: 30 });
+  y = doc.y + 10;
+  doc.text(t.kegiatan, xLeft, y, { width: wFull, align: 'justify', lineGap: 2.5 });
+  y = doc.y + 14;
+  doc.text(t.mohon, xLeft, y, { width: wFull, align: 'justify', lineGap: 2.5 });
+  y = doc.y + 10;
+  doc.text('Adapun kelengkapan berkas sebagai berikut :', xLeft + 30, y); y += 18;
+  t.lampiran.forEach((l, i) => { doc.text(`${i + 1}.`, xLeft + 8, y); doc.text(l, xLeft + 28, y); y += 14; });
+  y += 4;
+  doc.text(t.tutup, xLeft, y, { width: wFull, align: 'justify', lineGap: 2.5, indent: 30 });
+  y = doc.y + 34;
+
+  doc.text('Pejabat Pembuat Komitmen', xKanan, y, { width: wKanan, align: 'center' });
+  doc.text('RSUD dr. Soeratno Gemolong', xKanan, y + 14, { width: wKanan, align: 'center' });
+  doc.text('Kabupaten Sragen', xKanan, y + 28, { width: wKanan, align: 'center' });
+  y += 112;
+  doc.text(d.ppkom.nama || '………………………………', xKanan, y, { width: wKanan, align: 'center', underline: true });
+  doc.text(nipTxt(d.ppkom.nip), xKanan, y + 14, { width: wKanan, align: 'center' });
+  return doc;
+}
+
+async function penyerahanPpDocx(d) {
+  const W_PAGE = 11906, M_HORIZ = 1440, W_CONTENT = W_PAGE - 2 * M_HORIZ;
+  const t = teksPenyerahan(d);
+  const geser = { left: 4900 };
+  const docx = new D.Document({
+    creator: 'AdminProc', title: 'Surat Penyerahan Pekerjaan Pengadaan',
+    sections: [{
+      properties: { page: { size: { width: W_PAGE, height: 18709 }, margin: { top: 800, bottom: 800, left: M_HORIZ, right: M_HORIZ } } },
+      children: [
+        makeKopDocx(d.s, W_CONTENT),
+        para(run(`Gemolong, ${t.tglDoc}`, { size: 21 }), { indent: geser, before: 200, after: 120 }),
+        new D.Table({
+          width: { size: W_CONTENT, type: D.WidthType.DXA }, columnWidths: [1100, W_CONTENT - 1100], borders: NOBORDER,
+          rows: [['Nomor', t.noDoc], ['Lamp', '1 bendel'], ['Hal', 'Penyerahan Pekerjaan Pengadaan']].map(([k, v]) => new D.TableRow({
+            children: [cell(para(run(k, { size: 21 })), { w: 1100, mt: 10, mb: 10 }), cell(para(run(': ' + v, { size: 21 })), { w: W_CONTENT - 1100, mt: 10, mb: 10 })],
+          })),
+        }),
+        para(run('Kepada,', { size: 21 }), { indent: geser, before: 200 }),
+        para(run('Yth . Pejabat Pengadaan Barang dan Jasa RSUD dr. Soeratno Gemolong', { size: 21 }), { indent: geser }),
+        para(run('di –', { size: 21 }), { indent: geser }),
+        para(run('G E M O L O N G', { size: 21 }), { indent: { left: 5500 }, after: 240 }),
+        para(run(t.buka, { size: 21 }), { align: D.AlignmentType.JUSTIFIED, line: 276, after: 140, indent: { firstLine: 500 } }),
+        para(run(t.kegiatan, { size: 21 }), { align: D.AlignmentType.JUSTIFIED, line: 276, after: 200 }),
+        para(run(t.mohon, { size: 21 }), { align: D.AlignmentType.JUSTIFIED, line: 276, after: 140 }),
+        para(run('Adapun kelengkapan berkas sebagai berikut :', { size: 21 }), { indent: { firstLine: 500 }, after: 80 }),
+        ...t.lampiran.map((l, i) => para(run(`${i + 1}.   ${l}`, { size: 21 }), { indent: { left: 360 } })),
+        para(run(t.tutup, { size: 21 }), { align: D.AlignmentType.JUSTIFIED, line: 276, before: 100, after: 240, indent: { firstLine: 500 } }),
+        new D.Table({
+          width: { size: W_CONTENT, type: D.WidthType.DXA }, columnWidths: [4513, 4513], borders: NOBORDER,
+          rows: [new D.TableRow({
+            children: [
+              cell(para(run('')), { w: 4513 }),
+              cell([
+                para(run('Pejabat Pembuat Komitmen', { size: 21 }), { align: D.AlignmentType.CENTER }),
+                para(run('RSUD dr. Soeratno Gemolong', { size: 21 }), { align: D.AlignmentType.CENTER }),
+                para(run('Kabupaten Sragen', { size: 21 }), { align: D.AlignmentType.CENTER }),
+                para(run(''), { before: 1300 }),
+                para(run(d.ppkom.nama || '………………………………', { underline: true, size: 21 }), { align: D.AlignmentType.CENTER }),
+                para(run(nipTxt(d.ppkom.nip), { size: 21 }), { align: D.AlignmentType.CENTER }),
+              ], { w: 4513 }),
+            ],
+          })],
+        }),
+      ],
+    }],
+  });
+  return D.Packer.toBuffer(docx);
+}
+
 module.exports = {
+  penyerahanPpPdf, penyerahanPpDocx,
   undanganPlPdf, undanganPlDocx,
   baPembukaanPdf, baPembukaanDocx,
   baEvaluasiPdf, baEvaluasiDocx,

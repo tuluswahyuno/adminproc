@@ -5,14 +5,14 @@ import {
 } from 'lucide-react'
 import { api, hitungPajak, kategoriOf, num, persen, rp, terbilang, PERAN } from '../lib'
 import { Field, KategoriBadge, PageHeader, Progress, SearchableSelect, konfirmasiHapus } from '../ui'
-import { CetakMenu, PreviewModal, filterDokByTahap } from './Transaksi'
+import { CetakMenu, PreviewModal, epurPakaiHps, filterDokByTahap, modeDokumen } from './Transaksi'
 import { useKonflikNomor } from '../nomorCek'
 import { RekeningPicker, defaultPl, itemBaru, kosong } from './TransaksiForm'
 import { useAuth } from '../App'
 
 const hariIni = () => new Date().toISOString().slice(0, 10)
 // jalur dokumen mengikuti nilai paket (sama dengan aturan di server): <= Rp50 juta = 10–50 jt
-const modeAlur = (mode, nilai) => (nilai > 0 ? (nilai > 50000000 ? '50_750' : '10_50') : mode)
+const modeAlur = (mode, nilai) => (['10_50', '50_750'].includes(mode) && nilai > 0 ? (nilai > 50000000 ? '50_750' : '10_50') : mode)
 const NAMA_ALUR = { '10_50': '10–50 jt', '50_750': '50–750 jt' }
 const nomorLengkap = (urut, tahun) => `000.3.2/${urut}/05.1.2/${tahun}`
 const basisNomor = (u) => String(u || '').split('.')[0]
@@ -27,7 +27,7 @@ const DOK = {
   undangan_klarifikasi: 'Undangan Klarifikasi & Negosiasi', bakn: 'BA Klarifikasi & Negosiasi',
   ba_penetapan: 'BA Penetapan Pemenang', bahpl: 'BA Hasil Pengadaan Langsung', pengumuman_pl: 'Pengumuman Hasil PL',
   laporan_pl: 'Laporan Hasil PL ke PPK', spk: 'SPK', sppbj: 'SPPBJ', sp: 'Surat Pesanan', bast: 'BAST',
-  baphp: 'BAPHP', a2: 'A2 (Bukti Pengeluaran)', verifikasi: 'Lembar Verifikasi',
+  baphp: 'BAPHP', a2: 'A2 (Bukti Pengeluaran)', verifikasi: 'Lembar Verifikasi', penyerahan_pp: 'Surat Penyerahan Pekerjaan ke PP',
 }
 
 /* ---------- daftar langkah ---------- */
@@ -53,6 +53,17 @@ const LANGKAH_10 = [
   { id: 'terima', fase: 'BAST, BAPHP, A2 & Verifikasi', judul: 'BAST, BAPHP, A2 dan Verifikasi', dok: ['bast', 'baphp', 'a2', 'verifikasi'], tahap: 'selesai' },
 ]
 
+// E-Purchasing: KAK -> HPS (dokumen HPS hanya bila nilai > Rp100 jt) -> surat penyerahan ke Pejabat Pengadaan -> BAPHP, A2 & Verifikasi
+const LANGKAH_EP = [
+  { id: 'spektek', fase: 'Spesifikasi Teknis / KAK', judul: 'Spesifikasi Teknis / KAK Pengadaan Barang', dok: ['spektek'], tahap: 'spektek' },
+  { id: 'hps', fase: 'Harga Perkiraan (HPS)', judul: 'Harga Perkiraan Sendiri (HPS)', dok: ['hps'], tahap: 'hps' },
+  { id: 'penyerahan', fase: 'Penyerahan ke Pejabat Pengadaan', judul: 'Surat Penyerahan Pekerjaan ke Pejabat Pengadaan', dok: ['penyerahan_pp'], tahap: 'pesanan' },
+  { id: 'terima', fase: 'BAPHP, A2 & Verifikasi', judul: 'BA Penyerahan Hasil Pekerjaan, A2 dan Verifikasi', dok: ['baphp', 'a2', 'verifikasi'], tahap: 'selesai' },
+]
+const DAFTAR_LANGKAH = { '50_750': LANGKAH_50, '10_50': LANGKAH_10, epur: LANGKAH_EP }
+const TIER_VALID = ['10_50', '50_750', 'epur']
+const LABEL_NOMOR_EPUR = { sp: 'No. Surat Penyerahan Pekerjaan' }
+
 /* ---------- penomoran: kunci dokumen -> kolom ---------- */
 const NOMOR = {
   hps: { label: 'No. BA Penetapan HPS' },
@@ -75,14 +86,14 @@ const nomorDari = (f, k) => (NOMOR[k].pl ? f.pl?.[`${k}_no_urut`] : f[`${k}_no_u
 const tanggalDari = (f, k) => (NOMOR[k].pl ? f.pl?.[`${k}_tanggal`] : f[`${k}_tanggal`]) || ''
 
 // saran nomor berikutnya (dari server) disesuaikan dengan nomor yang sudah dipilih pada paket ini
-const saranNomor = (k, f, nn) => {
+const saranNomor = (k, f, nn, tier) => {
   switch (k) {
     case 'hps': return nn.nextHps
     case 'bakn': return f.sp_no_urut ? `${basisNomor(f.sp_no_urut)}.a` : nn.nextBakn
     case 'sp': { const m = /^(\d+)\.a$/i.exec(f.bakn_no_urut || ''); return m ? m[1] : nn.nextSp }
     case 'spk': return nn.nextSpk
     case 'bast': return nn.nextBast
-    case 'baphp': return `${basisNomor(f.bast_no_urut) || nn.nextBast}.a`
+    case 'baphp': return tier === 'epur' ? String(nn.nextBast || '') : `${basisNomor(f.bast_no_urut) || nn.nextBast}.a`
     case 'undangan': return nn.nextPlUndangan
     case 'pembukaan': return `${basisNomor(f.pl?.evaluasi_no_urut) || nn.nextPlEvaluasi}.b`
     case 'evaluasi': return `${basisNomor(f.pl?.pembukaan_no_urut) || nn.nextPlEvaluasi}.c`
@@ -122,9 +133,9 @@ const KAK = [
 ]
 
 /* ---------- komponen kecil ---------- */
-function NomorField({ k, f, tahun, nn, setNo, konflik }) {
+function NomorField({ k, f, tahun, nn, setNo, konflik, label, tier }) {
   const urut = nomorDari(f, k)
-  const saran = saranNomor(k, f, nn)
+  const saran = saranNomor(k, f, nn, tier)
   const sudahIsi = useRef(false)
   // 'tersimpan' = nomor sudah ada sebelum langkah dibuka; 'otomatis' / 'manual' = hasil isian pada sesi ini
   const [asal, setAsal] = useState(urut ? 'tersimpan' : '')
@@ -133,7 +144,7 @@ function NomorField({ k, f, tahun, nn, setNo, konflik }) {
   }, [saran]) // eslint-disable-line react-hooks/exhaustive-deps
   const ubah = (v) => { setAsal('manual'); setNo(k, v) }
   return (
-    <Field label={NOMOR[k].label}>
+    <Field label={label || NOMOR[k].label}>
       <div className={`flex items-stretch overflow-hidden rounded-xl border bg-white ${konflik ? 'border-rose-500 ring-2 ring-rose-200' : 'border-[#122922]/20 focus-within:border-[#122922]'}`}>
         <span className="grid place-items-center bg-[#f7f5ef] px-2.5 font-mono text-[11px] font-bold text-[#122922]/60">000.3.2/</span>
         <input className="w-24 min-w-0 flex-1 bg-transparent px-2 py-2 font-mono text-sm font-extrabold outline-none" value={urut} onChange={(e) => ubah(e.target.value.trim())} />
@@ -187,6 +198,7 @@ const MODE_TABEL = {
   penawaran: { ro: ['harga_hps'], edit: ['harga_penawaran'], hitung: 'harga_penawaran' },
   nego: { ro: ['harga_hps', 'harga_penawaran'], edit: ['harga_satuan'], hitung: 'harga_satuan' },
   nego10: { ro: ['harga_hps'], edit: ['harga_penawaran', 'harga_satuan'], hitung: 'harga_satuan' },
+  beli: { ro: ['harga_hps'], edit: ['harga_satuan'], hitung: 'harga_satuan', label: { harga_satuan: 'Harga Pembelian (Rp)' } },
 }
 const jumlahBaris = (it, key) => Math.round(angka(it.kuantitas) * angka(it[key]))
 const digit = (v) => String(v ?? '').replace(/\D/g, '')
@@ -216,7 +228,7 @@ function TabelBarang({ items, setItems, mode, aksi }) {
               <th className="th min-w-[13rem]">Uraian Barang / Spesifikasi</th>
               <th className="th w-24 text-center">Satuan</th>
               <th className="th w-20 text-center">Jumlah</th>
-              {m.edit.map((k) => <th key={k} className="th w-36 text-right">{KOLOM_HARGA[k]}</th>)}
+              {m.edit.map((k) => <th key={k} className="th w-36 text-right">{m.label?.[k] || KOLOM_HARGA[k]}</th>)}
               {m.hitung && <th className="th w-36 text-right">Jumlah (Rp)</th>}
               {m.barang && <th className="th w-10" />}
             </tr>
@@ -355,10 +367,11 @@ export default function PengadaanWizard() {
   const nav = useNavigate()
   const { user } = useAuth()
 
-  const [tier, setTier] = useState(sp.get('tier') === '10_50' ? '10_50' : '50_750')
-  const langkah = tier === '50_750' ? LANGKAH_50 : LANGKAH_10
+  const tierAwal = TIER_VALID.includes(sp.get('tier')) ? sp.get('tier') : '50_750'
+  const [tier, setTier] = useState(tierAwal)
+  const langkah = DAFTAR_LANGKAH[tier]
   const [f, setF] = useState(() => ({
-    ...kosong(), mode_pengadaan: sp.get('tier') === '10_50' ? '10_50' : '50_750', tahap: 'spektek',
+    ...kosong(), mode_pengadaan: tierAwal, tahap: 'spektek',
     spektek: { id_rup: '', tanggal: hariIni() }, pl: defaultPl(), items: [itemBaru()],
   }))
   const [saved, setSaved] = useState(id ? Number(id) : null)
@@ -378,7 +391,7 @@ export default function PengadaanWizard() {
   const pindahAwal = useRef(false)
 
   const tahun = useMemo(() => {
-    const t = (tier === '10_50' ? (f.sp_tanggal || f.tanggal) : f.tanggal) || ''
+    const t = (tier !== '50_750' ? (f.sp_tanggal || f.tanggal) : f.tanggal) || ''
     return t.slice(0, 4) || String(new Date().getFullYear())
   }, [tier, f.tanggal, f.sp_tanggal])
 
@@ -427,7 +440,7 @@ export default function PengadaanWizard() {
       if (Number(id) === saved && snap) return // baru saja dibuat dari halaman ini
       const t = await api('/transaksi/' + id)
       if (batal) return
-      if (!['10_50', '50_750'].includes(t.mode_pengadaan)) { nav(`/transaksi/${id}`, { replace: true }); return }
+      if (!TIER_VALID.includes(t.mode_pengadaan)) { nav(`/transaksi/${id}`, { replace: true }); return }
       const items = (t.items?.length ? t.items : [{ jenis_barang: t.uraian || '', satuan: 'Paket', kuantitas: 1, harga_hps: t.kotor, harga_satuan: t.kotor }]).map((it) => ({
         jenis_barang: it.jenis_barang, satuan: it.satuan || 'Unit', kuantitas: angka(it.kuantitas) || 1,
         harga_hps: angka(it.harga_hps) || '', harga_penawaran: angka(it.harga_penawaran) || '', harga_satuan: angka(it.harga_satuan) || '',
@@ -445,7 +458,7 @@ export default function PengadaanWizard() {
       }
       setTier(t.mode_pengadaan)
       setF(baru); setSnap(baru); setAwal(Number(t.kotor) || 0)
-      const daftar = t.mode_pengadaan === '50_750' ? LANGKAH_50 : LANGKAH_10
+      const daftar = DAFTAR_LANGKAH[t.mode_pengadaan]
       const minta = sp.get('langkah')
       const i = daftar.findIndex((l) => l.id === minta)
       setIdx(i >= 0 ? i : -1) // -1 = lompat ke langkah pertama yang belum selesai (dihitung di bawah)
@@ -469,6 +482,10 @@ export default function PengadaanWizard() {
   const totalPen = f.items.reduce((s, it) => s + jumlahBaris(it, 'harga_penawaran'), 0)
   const totalNego = f.items.reduce((s, it) => s + jumlahBaris(it, 'harga_satuan'), 0)
   const nilai = totalNego || totalHps
+  const epur = tier === 'epur'
+  const pakaiHps = !epur || epurPakaiHps(totalHps) // dokumen HPS E-Purchasing hanya untuk nilai di atas Rp100 juta
+  const modeDok = modeDokumen(tier, totalHps)
+  const labelNo = (k) => (epur && LABEL_NOMOR_EPUR[k]) || NOMOR[k].label
   const pajak = useMemo(() => hitungPajak({ kotor: nilai, ppn: f.ppn_aktif, pph: f.pph_aktif, ppnTarif: +f.ppn_tarif, pphTarif: +f.pph_tarif }), [nilai, f.ppn_aktif, f.pph_aktif, f.ppn_tarif, f.pph_tarif])
   const sisaPagu = rek ? rek.sisa + awal - nilai : null
 
@@ -494,8 +511,14 @@ export default function PengadaanWizard() {
       bayar: s.tahap === 'selesai' && !!s.uraian?.trim(),
       terima: !!s.bast_no_urut && !!s.baphp_no_urut && RANK(s) >= 7 && !!s.uraian?.trim(),
     }
+    if (epur) {
+      const hpsS = sum('harga_hps')
+      cek.hps = (!epurPakaiHps(hpsS) || !!s.hps_no_urut) && hpsS > 0 && RANK(s) >= 1
+      cek.penyerahan = !!s.sp_no_urut && !!s.uraian?.trim() && RANK(s) >= 6
+      cek.terima = !!s.baphp_no_urut && RANK(s) >= 7 && !!s.uraian?.trim() && !!s.penyedia?.trim()
+    }
     return langkah.map((l) => !!cek[l.id])
-  }, [snap, langkah])
+  }, [snap, langkah, epur])
   const terjauh = Math.min(terisi.findIndex((x) => !x) === -1 ? langkah.length - 1 : terisi.findIndex((x) => !x), langkah.length - 1)
 
   useEffect(() => {
@@ -510,6 +533,7 @@ export default function PengadaanWizard() {
     spektek: [], hps: ['hps'], undangan: ['undangan'], pembukaan: ['pembukaan'], evaluasi: ['evaluasi'], undklar: ['undangan_klarifikasi'],
     bakn: ['bakn'], penetapan: ['penetapan', 'bahpl', 'pengumuman', 'laporan'], spk: ['spk'], sppbj: ['sppbj'], sp: ['sp'], serah: ['bast', 'baphp'], terima: ['bast', 'baphp'], bayar: [],
   }
+  if (epur) Object.assign(nomorLangkah, { hps: pakaiHps ? ['hps'] : [], penyerahan: ['sp'], terima: ['baphp'] })
 
   /* ----- nomor kembar: diperiksa langsung ke server; simpan / lanjut diblokir ----- */
   const entriNomor = Object.keys(NOMOR).flatMap((k) => {
@@ -517,7 +541,7 @@ export default function PengadaanWizard() {
     if ((NOMOR[k].pl || k === 'spk') ? !alurPl : (k === 'sp' && alurPl)) return []
     const u = nomorDari(f, k)
     if (!u || !((nomorLangkah[L?.id] || []).includes(k) || nomorDari(snap || {}, k))) return []
-    return [{ kunci: k, label: NOMOR[k].label.replace('No. ', ''), no_urut: u }]
+    return [{ kunci: k, label: labelNo(k).replace('No. ', ''), no_urut: u }]
   })
   const konflikNomor = useKonflikNomor(tahun, saved, entriNomor)
   const adaKembar = Object.keys(konflikNomor).filter((k) => entriNomor.some((e) => e.kunci === k))
@@ -557,7 +581,10 @@ export default function PengadaanWizard() {
     const rank = Math.max(TAHAP_RANK[L.tahap] ?? 0, TAHAP_RANK[f.tahap] ?? 0)
     if (id === 'spektek' && !f.items.some((i) => i.jenis_barang.trim())) return 'Isi minimal satu barang pada kartu "Barang yang diadakan".'
     if (rank >= 1 && nilai <= 0) return 'Isi harga barang dulu (HPS, penawaran, atau harga kontrak) agar paket bisa disimpan.'
-    if (rank >= 2 && !f.penyedia.trim()) return 'Nama penyedia wajib diisi.'
+    if (rank >= 2 && !epur && !f.penyedia.trim()) return 'Nama penyedia wajib diisi.'
+    if (epur && id === 'penyerahan' && !f.uraian.trim()) return 'Isi uraian paket (mis. pembelian Printer Epson L121) — dipakai pada surat penyerahan.'
+    if (epur && id === 'terima' && !f.penyedia.trim()) return 'Isi penyedia hasil e-Purchasing (e-Katalog).'
+    if (epur && id === 'terima' && totalNego <= 0) return 'Isi harga pembelian hasil e-Purchasing (atau tekan "samakan dengan HPS").'
     if (id === 'hps' && totalHps <= 0) return 'Isi harga HPS minimal untuk satu barang.'
     if (id === 'undangan' && !(f.pl.lingkup_pekerjaan || '').trim()) return 'Isi Lingkup pekerjaan (dipakai sebagai uraian paket pada dokumen).'
     if (id === 'pembukaan' && totalPen <= 0) return 'Isi harga penawaran dari penyedia.'
@@ -626,7 +653,7 @@ export default function PengadaanWizard() {
       muatNomor()
       api('/penyedia').then(setPenyedia)
       if (rek) api('/rekening?q=' + encodeURIComponent(rek.kode)).then((r) => setRek(r.find((y) => y.id === rek.id) || rek))
-      if (lihat) setPreview({ id: target, jenis: lihat, tahap: body.tahap, modePengadaan: tier })
+      if (lihat) setPreview({ id: target, jenis: lihat, tahap: body.tahap, modePengadaan: modeDok })
       else if (lanjut && idx < langkah.length - 1) { setIdx(idx + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }
       else if (lanjut) { nav('/transaksi'); return true }
       setOk('Tersimpan'); setTimeout(() => setOk(''), 1800)
@@ -669,7 +696,7 @@ export default function PengadaanWizard() {
     if (!siap || idx < 0) return
     const punyaBoxPenyedia = tier === '50_750' ? 'undangan' : 'bakn'
     setBantu({
-      penyedia: (TAHAP_RANK[L.tahap] ?? 0) >= 2 && L.id !== punyaBoxPenyedia && !f.penyedia.trim(),
+      penyedia: !epur && (TAHAP_RANK[L.tahap] ?? 0) >= 2 && L.id !== punyaBoxPenyedia && !f.penyedia.trim(),
       barang: ['sp', 'spk'].includes(L.id) || (!['spektek', 'hps', 'pembukaan', 'bakn'].includes(L.id) && nilai <= 0),
     })
     setRbaBuka(false)
@@ -681,8 +708,8 @@ export default function PengadaanWizard() {
     <div className="grid gap-4 sm:grid-cols-2">
       {kunci.map((k) => (
         <div key={k} className="contents">
-          <NomorField k={k} f={f} tahun={tahun} nn={nn} setNo={setNo} konflik={konflikNomor[k]} />
-          <TanggalField label={`Tanggal ${NOMOR[k].label.replace('No. ', '')}`} value={tanggalDari(f, k)} onChange={(v) => setTgl(k, v)} />
+          <NomorField k={k} f={f} tahun={tahun} nn={nn} setNo={setNo} konflik={konflikNomor[k]} label={labelNo(k)} tier={tier} />
+          <TanggalField label={`Tanggal ${labelNo(k).replace('No. ', '')}`} value={tanggalDari(f, k)} onChange={(v) => setTgl(k, v)} />
         </div>
       ))}
     </div>
@@ -722,7 +749,7 @@ export default function PengadaanWizard() {
       <>
         <Kartu badge="KAK" judul="Data KAK">
           <div className="grid gap-4 sm:grid-cols-2">
-            <TanggalField label="Tanggal KAK / awal paket" value={f.tanggal} onChange={(v) => setF((x) => ({ ...x, tanggal: v, spektek: { ...x.spektek, tanggal: v }, ...(tier === '10_50' && x.sp_tanggal === x.tanggal ? { sp_tanggal: v } : {}) }))} />
+            <TanggalField label="Tanggal KAK / awal paket" value={f.tanggal} onChange={(v) => setF((x) => ({ ...x, tanggal: v, spektek: { ...x.spektek, tanggal: v }, ...(tier !== '50_750' && x.sp_tanggal === x.tanggal ? { sp_tanggal: v } : {}) }))} />
             <Field label="ID RUP"><input className="input font-mono" value={f.spektek.id_rup || ''} onChange={(e) => updSpek('id_rup', e.target.value)} placeholder="mis. 62736023" /></Field>
           </div>
           {rek && (
@@ -749,8 +776,13 @@ export default function PengadaanWizard() {
     ),
     hps: () => (
       <>
-        <Kartu badge="HPS" judul={tier === '10_50' ? 'Berita Acara Penetapan HPS' : 'BA Penetapan HPS'} nomor={noLengkap('hps')}>{nomorTanggal(['hps'])}</Kartu>
-        <Kartu badge="RINCI" judul={tier === '10_50' ? 'Lampiran Rincian HPS' : 'Rincian harga HPS'}>
+        {epur && !pakaiHps && (
+          <Kartu badge="INFO" judul="HPS E-Purchasing">
+            <p className="text-sm text-[#122922]/80">Dokumen HPS hanya dibuat untuk paket bernilai <b>di atas Rp100.000.000</b>. Nilai di bawah itu tetap diisi sebagai harga perkiraan, karena dicantumkan pada surat penyerahan pekerjaan.</p>
+          </Kartu>
+        )}
+        {pakaiHps && <Kartu badge="HPS" judul={tier !== '50_750' ? 'Berita Acara Penetapan HPS' : 'BA Penetapan HPS'} nomor={noLengkap('hps')}>{nomorTanggal(['hps'])}</Kartu>}
+        <Kartu badge="RINCI" judul={epur ? (pakaiHps ? 'Rincian Harga Perkiraan Sendiri (HPS)' : 'Harga perkiraan paket') : tier === '10_50' ? 'Lampiran Rincian HPS' : 'Rincian harga HPS'}>
           <TabelBarang items={f.items} setItems={setItems} mode="hps" />
           <p className="text-xs text-[#122922]/60">Terbilang: <b>{terbilang(totalHps) || '—'}</b></p>
         </Kartu>
@@ -844,6 +876,24 @@ export default function PengadaanWizard() {
       </>
     ),
     sppbj: () => <Kartu badge="SPPBJ" judul="Surat Penunjukan Penyedia Barang/Jasa" nomor={noLengkap('sppbj')}>{nomorTanggal(['sppbj'])}</Kartu>,
+    penyerahan: () => (
+      <>
+        <Kartu badge="SURAT" judul="Surat Penyerahan Pekerjaan ke Pejabat Pengadaan" nomor={noLengkap('sp')}>
+          {nomorTanggal(['sp'])}
+          <Field label="Uraian paket (untuk kalimat “… untuk …”)" hint="Contoh: pembelian Printer Epson L121. Kegiatan = nama kode rekening, nilai = total HPS di langkah sebelumnya.">
+            <textarea rows={2} className="input" value={f.uraian} onChange={(e) => upd({ uraian: e.target.value })} placeholder="mis. pembelian Printer Epson L121" />
+          </Field>
+          <div className="rounded-xl border border-[#122922]/15 bg-[#f7f5ef]/60 p-3.5 text-xs">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div><div className="text-[#122922]/55">Kegiatan (kode rekening)</div><div className="font-bold">{rek?.uraian || '— pilih kode rekening —'}</div></div>
+              <div><div className="text-[#122922]/55">Nilai Harga Perkiraan Sendiri</div><div className="font-mono font-bold">{rp(totalHps)}</div></div>
+              <div><div className="text-[#122922]/55">Lampiran berkas</div><div className="font-bold">Spesifikasi teknis{pakaiHps ? ' + HPS' : ''}</div></div>
+              <div><div className="text-[#122922]/55">Tanda tangan</div><div className="font-bold">PPK: {pejabat.find((p) => p.id === (f.ppkom_id || rek?.ppkom_id))?.nama || '— belum diatur —'}</div></div>
+            </div>
+          </div>
+        </Kartu>
+      </>
+    ),
     sp: () => (
       <Kartu badge="SP" judul="Surat Pesanan" nomor={noLengkap('sp')}>
         {nomorTanggal(['sp'])}
@@ -873,12 +923,30 @@ export default function PengadaanWizard() {
         </Kartu>
       </>
     ),
-    terima: () => (
+    terima: () => (epur ? (
+      <>
+        <Kartu badge="PNY" judul="Penyedia hasil e-Purchasing (e-Katalog)"><PenyediaBox f={f} upd={upd} daftar={penyedia} /></Kartu>
+        <Kartu badge="HRG" judul="Harga pembelian e-Purchasing">
+          <TabelBarang
+            items={f.items} setItems={setItems} mode="beli"
+            aksi={<button type="button" className="btn-ghost !py-1.5 text-xs" onClick={samakanHarga}>Samakan harga pembelian dengan HPS</button>}
+          />
+          {totalNego > totalHps && totalHps > 0 && <Peringatan>Harga pembelian ({rp(totalNego)}) melebihi HPS ({rp(totalHps)}).</Peringatan>}
+        </Kartu>
+        <Kartu badge="URAIAN" judul="Uraian pekerjaan">
+          <Field label="Yaitu untuk pembayaran / rincian paket pekerjaan" hint="Tampil di A2, Verifikasi, dan BAPHP.">
+            <textarea rows={2} className="input" value={f.uraian} onChange={(e) => upd({ uraian: e.target.value })} />
+          </Field>
+        </Kartu>
+        <Kartu badge="BAPHP" judul="Berita Acara Penyerahan Hasil Pekerjaan" nomor={noLengkap('baphp')}>{nomorTanggal(['baphp'])}</Kartu>
+        <Kartu badge="A2" judul="Pajak & nilai pembayaran (A2)">{pajakJsx}</Kartu>
+      </>
+    ) : (
       <>
         {isi.serah()}
         <Kartu badge="A2" judul="Pajak & nilai pembayaran (A2)">{pajakJsx}</Kartu>
       </>
-    ),
+    )),
   }
 
   const rbaTerbuka = rbaBuka || L?.id === 'spektek' || !f.rekening_id
@@ -911,19 +979,18 @@ export default function PengadaanWizard() {
   const langkahFaseIni = indeksFase(L.fase)
   const terakhir = idx === langkah.length - 1
   const selesai = terisi.filter(Boolean).length
-  const modeDok = tier
   const berikut = langkah[idx + 1]
   const jumlahBarang = f.items.filter((i) => i.jenis_barang.trim()).length
 
   return (
     <>
       <PageHeader
-        kicker={tier === '50_750' ? 'Alur Pengadaan Langsung 50–750 Juta' : 'Alur Pengadaan 10–50 Juta'}
+        kicker={tier === '50_750' ? 'Alur Pengadaan Langsung 50–750 Juta' : epur ? 'Alur E-Purchasing' : 'Alur Pengadaan 10–50 Juta'}
         title={f.uraian?.trim() || rek?.uraian || 'Paket Pengadaan Baru'}
         desc={`${selesai}/${langkah.length} langkah selesai`}
       >
         <Link to="/transaksi" className="btn-ghost"><ArrowLeft size={15} /> Daftar paket</Link>
-        {saved && <CetakMenu id={saved} tahap={f.tahap} modePengadaan={tier} onPreview={setPreview} />}
+        {saved && <CetakMenu id={saved} tahap={f.tahap} modePengadaan={modeDok} onPreview={setPreview} />}
         {saved && <button type="button" onClick={hapus} className="btn-ghost !text-rose-600"><Trash2 size={15} /> Hapus</button>}
       </PageHeader>
 
@@ -990,16 +1057,16 @@ export default function PengadaanWizard() {
               {nilai > 0 && <KategoriBadge kode={kategoriOf(nilai).kode} />}
             </div>
             <dl className="space-y-2 text-xs">
-              <Baris l="Alur" v={tier === '50_750' ? 'PL 50–750 Juta (17 Dok)' : 'SPJ 10–50 Juta (8 Dok)'} />
+              <Baris l="Alur" v={tier === '50_750' ? 'PL 50–750 Juta (17 Dok)' : epur ? (pakaiHps ? 'E-Purchasing (6 Dok)' : 'E-Purchasing (5 Dok)') : 'SPJ 10–50 Juta (8 Dok)'} />
               <Baris l="Rekening" v={rek?.kode || '—'} />
               {f.penyedia && <Baris l="Penyedia" v={f.penyedia} biasa />}
-              {(nomorLangkah[L.id] || []).map((k) => <Baris key={k} l={NOMOR[k].label.replace('No. ', 'No. ')} v={noLengkap(k) || '—'} />)}
+              {(nomorLangkah[L.id] || []).map((k) => <Baris key={k} l={labelNo(k)} v={noLengkap(k) || '—'} />)}
               <Baris l="Jumlah item" v={`${jumlahBarang} jenis barang`} biasa />
             </dl>
             <dl className="space-y-2 border-t border-[#122922]/15 pt-3 text-sm tabular-nums">
               <Baris l="Total HPS" v={rp(totalHps)} />
               {tier === '50_750' && <Baris l="Harga penawaran" v={totalPen ? rp(totalPen) : '—'} />}
-              <Baris l={tier === '50_750' ? 'Nilai kontrak (SPK)' : 'Nilai negosiasi'} v={totalNego ? rp(totalNego) : '—'} />
+              <Baris l={tier === '50_750' ? 'Nilai kontrak (SPK)' : epur ? 'Harga pembelian' : 'Nilai negosiasi'} v={totalNego ? rp(totalNego) : '—'} />
               {['bayar', 'terima'].includes(L.id) && (
                 <>
                   {f.ppn_aktif && <Baris l={`PPN (${f.ppn_tarif}%)`} v={rp(pajak.ppn)} />}
@@ -1101,6 +1168,9 @@ const IKON_FASE = {
   'Spesifikasi Teknis / KAK': FileText,
   'Penetapan HPS': CalendarRange,
   'Surat Pesanan': FileCheck,
+  'Harga Perkiraan (HPS)': CalendarRange,
+  'Penyerahan ke Pejabat Pengadaan': FileCheck,
+  'BAPHP, A2 & Verifikasi': PackageCheck,
   'BAST, BAPHP, A2 & Verifikasi': PackageCheck,
   Perencanaan: FileText,
   'Pemilihan Penyedia': CalendarRange,

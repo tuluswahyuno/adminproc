@@ -934,7 +934,7 @@ function bacaTrx(b, user, tahunDefault) {
   const bastNomor = String(b.bast_nomor || '').trim() || (bastUrut ? `000.3.2/${bastUrut}/05.1.2/${thn}` : '');
   const baphpNomor = String(b.baphp_nomor || '').trim() || (baphpUrut ? `000.3.2/${baphpUrut}/05.1.2/${thn}` : '');
   const isSpjLangsung = b.tahap === 'spj_langsung';
-  const modeAwal = b.mode_pengadaan && ['0_10', '10_50', '50_750'].includes(b.mode_pengadaan)
+  const modeAwal = b.mode_pengadaan && ['0_10', '10_50', '50_750', 'epur'].includes(b.mode_pengadaan)
     ? b.mode_pengadaan
     : (kotor > 50000000 ? '50_750' : kotor > 10000000 || hpsNomor || baknNomor ? '10_50' : '0_10');
   const modePengadaan = isSpjLangsung ? '0_10' : modeAlur(modeAwal, kotor);
@@ -942,7 +942,7 @@ function bacaTrx(b, user, tahunDefault) {
   const validTahap = ['spektek', 'hps', 'spektek_hps', 'undangan', 'evaluasi', 'negosiasi', 'penetapan', 'kontrak', 'pesanan', 'selesai', 'spj_langsung'];
   const tahap = isSpjLangsung
     ? 'spj_langsung'
-    : tahapUntukMode(modePengadaan, validTahap.includes(b.tahap) ? b.tahap : (bastNomor ? 'selesai' : modePengadaan === '50_750' ? 'undangan' : 'pesanan'));
+    : tahapUntukMode(modePengadaan, validTahap.includes(b.tahap) ? b.tahap : (bastNomor || (modePengadaan === 'epur' && baphpNomor) ? 'selesai' : modePengadaan === '50_750' ? 'undangan' : modePengadaan === 'epur' ? 'spektek' : 'pesanan'));
 
   const is50750 = modePengadaan === '50_750';
   const spkUrut = is50750 ? String(b.spk_no_urut || b.pl?.spk_no_urut || '').trim() : '';
@@ -953,7 +953,8 @@ function bacaTrx(b, user, tahunDefault) {
   if (!b.tanggal || !b.rekening_id) {
     throw new Error('Tanggal dan kode rekening wajib diisi');
   }
-  if (!['spektek', 'hps', 'spektek_hps'].includes(tahap) && !b.penyedia?.trim()) {
+  const tanpaPenyedia = ['spektek', 'hps', 'spektek_hps'].includes(tahap) || (modePengadaan === 'epur' && tahap === 'pesanan');
+  if (!tanpaPenyedia && !b.penyedia?.trim()) {
     throw new Error('Nama penyedia (CV/PT) wajib diisi');
   }
   if (tahap === 'spektek' && items.length === 0) {
@@ -968,7 +969,7 @@ function bacaTrx(b, user, tahunDefault) {
 
   const n = (v) => (v ? Number(v) : null);
   const pengadaanId = n(b.pengadaan_id) || (user?.role === 'pejabat_pengadaan' ? n(user.pejabat_id) : null);
-  const spektekStr = is50750 || modePengadaan === '10_50'
+  const spektekStr = is50750 || modePengadaan === '10_50' || modePengadaan === 'epur'
     ? (typeof b.spektek === 'object' && b.spektek !== null ? JSON.stringify(b.spektek) : (typeof b.spektek_json === 'string' ? b.spektek_json : null))
     : null;
   // data alur 50–750 jt tetap disimpan walau paket sementara berada di jalur 10–50 jt (nilai bisa berubah)
@@ -976,7 +977,7 @@ function bacaTrx(b, user, tahunDefault) {
 
   let plObj = null;
   if (is50750) { try { plObj = JSON.parse(plStr || 'null'); } catch { plObj = null; } }
-  const nomor = entriNomor({ hps: hpsUrut, bakn: baknUrut, sp: spUrut, spk: spkUrut, bast: bastUrut, baphp: baphpUrut }, plObj, is50750);
+  const nomor = entriNomor({ hps: hpsUrut, bakn: baknUrut, sp: spUrut, spk: spkUrut, bast: bastUrut, baphp: baphpUrut }, plObj, is50750, modePengadaan);
   const tahunNo = String(b.sp_tanggal || b.tanggal || '').slice(0, 4);
 
   return {
@@ -1097,7 +1098,7 @@ app.get('/api/transaksi/:id/dokumen/:jenis.:format', aksesTrx(false), wrap(async
   const validJenis = [
     'spektek', 'hps', 'bakn', 'sp', 'bast', 'baphp', 'a2', 'verifikasi',
     'undangan_pl', 'ba_pembukaan', 'ba_evaluasi', 'undangan_klarifikasi',
-    'ba_penetapan', 'bahpl', 'pengumuman_pl', 'laporan_pl', 'sppbj', 'spk'
+    'ba_penetapan', 'bahpl', 'pengumuman_pl', 'laporan_pl', 'sppbj', 'spk', 'penyerahan_pp'
   ];
   if (!validJenis.includes(jenis) || !['pdf', 'docx'].includes(format)) {
     return res.status(400).json({ error: 'Jenis/format tidak valid' });

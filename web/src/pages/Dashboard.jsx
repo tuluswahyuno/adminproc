@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { api, rp, rpRingkas, persen, bulanLabel, tgl, kategoriOf, KATEGORI } from '../lib'
 import { PageHeader, Progress, Empty, KategoriBadge, BuatDokumenMenu } from '../ui'
-import { PreviewModal } from './Transaksi'
+import { PreviewModal, modeDokumen } from './Transaksi'
 import { useAuth } from '../App'
 
 /* alur dokumen per kategori nilai: urutan langkah (tahap) dan dokumen penutup */
@@ -14,11 +14,12 @@ const ALUR = {
   '0_2': { langkah: ['SP', 'BAPHP, A2 & Verifikasi'], tahapSelesai: 1 },
   '0_10': { langkah: ['Surat Pesanan', 'BAST, BAPHP, A2 & Verifikasi'], tahapSelesai: 1 },
   '10_50': { langkah: ['Spesifikasi Teknis / KAK', 'Penetapan HPS', 'BA Klarifikasi & Negosiasi', 'Surat Pesanan', 'BAST, BAPHP, A2 & Verifikasi'], urutTahap: ['spektek', 'hps', 'negosiasi', 'pesanan', 'selesai'] },
+  epur: { langkah: ['Spesifikasi Teknis / KAK', 'HPS', 'Surat Penyerahan ke Pejabat Pengadaan', 'BAPHP, A2 & Verifikasi'], urutTahap: ['spektek', 'hps', 'pesanan', 'selesai'] },
   '50_750': { langkah: ['Spesifikasi Teknis / KAK', 'Penetapan HPS', 'Undangan Pengadaan Langsung', 'BA Pembukaan & Evaluasi', 'Klarifikasi & Negosiasi', 'Penetapan Pemenang, BAHPL & Laporan', 'SPPBJ & SPK', 'BAST, BAPHP, A2 & Verifikasi'], urutTahap: ['spektek', 'hps', 'undangan', 'evaluasi', 'negosiasi', 'penetapan', 'kontrak', 'selesai'] },
 }
 function alurPaket(t) {
   const selesai = t.tahap === 'selesai' || t.tahap === 'spj_langsung' || !!t.bast_nomor || !!t.baphp_nomor
-  const wizard = ['10_50', '50_750'].includes(t.mode_pengadaan)
+  const wizard = ['10_50', '50_750', 'epur'].includes(t.mode_pengadaan)
   const kunci = wizard ? t.mode_pengadaan : (Number(t.kotor) <= 2000000 ? '0_2' : '0_10')
   const a = ALUR[kunci]
   const total = a.langkah.length
@@ -29,7 +30,7 @@ function alurPaket(t) {
   return {
     selesai, sudah, total, persen: Math.round((sudah / total) * 100),
     berikut: a.langkah[Math.min(sudah, total - 1)],
-    dokumen: selesai ? (kunci === '0_2' ? 'baphp' : 'bast') : (wizard ? (dokTahap[t.tahap] || 'spektek') : 'sp'),
+    dokumen: selesai ? (kunci === '0_2' || kunci === 'epur' ? 'baphp' : 'bast') : (kunci === 'epur' && t.tahap === 'pesanan' ? 'penyerahan_pp' : wizard ? (dokTahap[t.tahap] || 'spektek') : 'sp'),
     href: wizard ? '/pengadaan/' + t.id : '/transaksi/' + t.id + '?mode=terima',
   }
 }
@@ -37,6 +38,7 @@ const ALUR_RINGKAS = [
   { kode: 'K1', alur: 'Surat Pesanan → BAPHP, A2 & Verifikasi' },
   { kode: 'K2', alur: 'Surat Pesanan → BAST → BAPHP, A2 & Verifikasi' },
   { kode: 'K3', alur: '5 tahap: KAK → HPS → BA Negosiasi → SP → BAST/BAPHP' },
+  { kode: 'EP', label: 'E-Purchasing', tone: 'bg-[#a9dcf0] text-[#122922]', alur: 'KAK → HPS (hanya di atas Rp100 jt) → Surat Penyerahan ke PP → BAPHP, A2 & Verifikasi' },
   { kode: 'K4', alur: '8 tahap pengadaan langsung: Undangan → Evaluasi → Negosiasi → Penetapan → SPPBJ/SPK → BAST' },
 ]
 
@@ -256,6 +258,7 @@ export default function Dashboard() {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${kat.tone}`}>{kat.label}</span>
+                            {t.mode_pengadaan === 'epur' && <span className="rounded-full border border-[#122922] bg-[#a9dcf0] px-2 py-0.5 text-[10px] font-extrabold">E-Purchasing</span>}
                             <span className="font-extrabold text-[#122922]">{t.penyedia && t.penyedia !== '-' ? t.penyedia : 'Penyedia belum dipilih'}</span>
                             <span className="font-mono text-[11px] text-[#4b5e57]">· {tgl(t.sp_tanggal || t.tanggal)}</span>
                           </div>
@@ -266,7 +269,7 @@ export default function Dashboard() {
                           <div className="font-mono text-sm font-extrabold text-[#122922]">{rp(t.kotor)}</div>
                           <button
                             type="button"
-                            onClick={() => setPreview({ id: t.id, jenis: a.dokumen, tahap: t.tahap, modePengadaan: t.mode_pengadaan })}
+                            onClick={() => setPreview({ id: t.id, jenis: a.dokumen, tahap: t.tahap, modePengadaan: modeDokumen(t.mode_pengadaan, t.hps_total || t.kotor) })}
                             className="rounded-xl border border-[#122922]/20 p-2 text-[#122922] hover:bg-[#d6ee30]"
                             title="Pratinjau Dokumen"
                           ><Eye size={15} /></button>
@@ -299,7 +302,7 @@ export default function Dashboard() {
             <div className="grid gap-1.5 sm:grid-cols-2">
               {ALUR_RINGKAS.map((x) => (
                 <div key={x.kode} className="flex items-start gap-2">
-                  <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${KATEGORI.find((k) => k.kode === x.kode).tone}`}>{KATEGORI.find((k) => k.kode === x.kode).label}</span>
+                  <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${(x.tone || KATEGORI.find((k) => k.kode === x.kode).tone)}`}>{x.label || KATEGORI.find((k) => k.kode === x.kode).label}</span>
                   <span className="min-w-0 text-[11px] font-semibold leading-snug text-[#122922]/80">{x.alur}</span>
                 </div>
               ))}

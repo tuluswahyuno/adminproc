@@ -594,7 +594,7 @@ export default function TransaksiForm() {
       const baphpNomor = t.baphp_nomor || (baphpUrut ? `000.3.2/${baphpUrut}/05.1.2/${nomor.tahun}` : '')
       const defaultPengurusId = t.pengurus_barang_id || s.pengurus_barang_id || pList.find((x) => x.peran === 'PENGURUS_BARANG' && x.aktif)?.id || ''
 
-      if (['10_50', '50_750'].includes(t.mode_pengadaan)) { nav(`/pengadaan/${id}`, { replace: true }); return }
+      if (['10_50', '50_750', 'epur'].includes(t.mode_pengadaan)) { nav(`/pengadaan/${id}`, { replace: true }); return }
       setF({
         ...kosong(),
         ...t,

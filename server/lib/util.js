@@ -55,6 +55,8 @@ function kategori(n) {
 
 // Jalur dokumen mengikuti nilai paket: sampai Rp50 juta = 10–50 jt, di atasnya = 50–750 jt (nilai 0 = belum ditentukan).
 const BATAS_ALUR_PL = 50_000_000;
+// E-Purchasing: dokumen HPS hanya dibuat untuk paket bernilai di atas Rp100 juta
+const BATAS_HPS_EPUR = 100_000_000;
 function modeAlur(mode, nilai) {
   if (mode !== '10_50' && mode !== '50_750') return mode;
   const n = Number(nilai) || 0;
@@ -91,5 +93,5 @@ function tglKalimatBast(iso) {
   };
 }
 
-module.exports = { modeAlur, tahapUntukMode, BATAS_ALUR_PL, passwordAcak, terbilang, baca, rupiah, hitungPajak, kategori, KATEGORI, tglIndo, tglKalimatBast };
+module.exports = { modeAlur, tahapUntukMode, BATAS_ALUR_PL, BATAS_HPS_EPUR, passwordAcak, terbilang, baca, rupiah, hitungPajak, kategori, KATEGORI, tglIndo, tglKalimatBast };
 

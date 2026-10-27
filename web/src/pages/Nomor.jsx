@@ -10,7 +10,7 @@ const angkaDari = (urut) => {
   const n = parseInt(urut, 10)
   return Number.isNaN(n) ? null : n
 }
-const linkPaket = (i) => (['10_50', '50_750'].includes(i.mode) ? `/pengadaan/${i.transaksi_id}` : `/transaksi/${i.transaksi_id}`)
+const linkPaket = (i) => (['10_50', '50_750', 'epur'].includes(i.mode) ? `/pengadaan/${i.transaksi_id}` : `/transaksi/${i.transaksi_id}`)
 
 function NomorModal({ data, tahun, onClose, onSaved }) {
   const [f, setF] = useState(data)

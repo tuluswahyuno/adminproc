@@ -62,6 +62,23 @@ async function ambilData(id) {
   };
 }
 
+// dokumen dasar yang disebut pada BAST / BAPHP: SPK (50–750 jt), Surat Penyerahan Pekerjaan (E-Purchasing), atau Surat Pesanan
+function dasarPerikatan(d) {
+  const mode = d.t.mode_pengadaan;
+  if (mode === '50_750') {
+    return {
+      perikatanLabel: 'Surat Perintah Kerja (SPK)',
+      noPerikatan: d.t.spk_nomor || d.pl?.spk_nomor || `000.3.2/${d.t.spk_no_urut || d.pl?.spk_no_urut || '2673'}/05.1.2/${d.tahun}`,
+      tglPerikatan: tglIndo(d.t.spk_tanggal || d.pl?.spk_tanggal || d.t.tanggal),
+    };
+  }
+  return {
+    perikatanLabel: mode === 'epur' ? 'Surat Penyerahan Pekerjaan Pengadaan' : 'Surat Pesanan (SP)',
+    noPerikatan: d.t.sp_nomor || `000.3.2/${d.t.sp_no_urut || '1607'}/05.1.2/${d.tahun}`,
+    tglPerikatan: tglIndo(d.t.sp_tanggal || d.t.tanggal),
+  };
+}
+
 const nipTxt = (n) => (n ? (/^nip/i.test(n) ? n : 'NIP. ' + n) : '');
 const fmtNum = (n) => Math.round(Number(n) || 0).toLocaleString('id-ID');
 
@@ -1012,12 +1029,7 @@ function bastPdf(d) {
   drawPartyRow('Nomor RBA', d.rek.kode || '-');
 
   y += 8;
-  const is50750 = d.t.mode_pengadaan === '50_750' || !!d.t.pl_json;
-  const perikatanLabel = is50750 ? 'Surat Perintah Kerja (SPK)' : 'Surat Pesanan (SP)';
-  const noPerikatan = is50750
-    ? (d.t.spk_nomor || d.pl?.spk_nomor || `000.3.2/${d.t.spk_no_urut || d.pl?.spk_no_urut || '2673'}/05.1.2/${d.tahun}`)
-    : (d.t.sp_nomor || `000.3.2/${d.t.sp_no_urut || '1607'}/05.1.2/${d.tahun}`);
-  const tglPerikatan = tglIndo(is50750 ? (d.t.spk_tanggal || d.pl?.spk_tanggal || d.t.tanggal) : (d.t.sp_tanggal || d.t.tanggal));
+  const { perikatanLabel, noPerikatan, tglPerikatan } = dasarPerikatan(d);
   const namaRek = (d.rek?.uraian || '').trim();
   const isianUser = (d.t.uraian || '').trim();
   const paketTxt = namaRek && isianUser && namaRek.toLowerCase() !== isianUser.toLowerCase()
@@ -1255,12 +1267,7 @@ async function spDocx(d) {
 async function bastDocx(d) {
   const W_PAGE = 11906, M_HORIZ = 1440, W_CONTENT = W_PAGE - 2 * M_HORIZ;
   const noBast = d.t.bast_nomor || `000.3.2/${d.t.bast_no_urut || '1631'}/05.1.2/${d.tahun}`;
-  const is50750 = d.t.mode_pengadaan === '50_750' || !!d.t.pl_json;
-  const perikatanLabel = is50750 ? 'Surat Perintah Kerja (SPK)' : 'Surat Pesanan (SP)';
-  const noPerikatan = is50750
-    ? (d.t.spk_nomor || d.pl?.spk_nomor || `000.3.2/${d.t.spk_no_urut || d.pl?.spk_no_urut || '2673'}/05.1.2/${d.tahun}`)
-    : (d.t.sp_nomor || `000.3.2/${d.t.sp_no_urut || '1607'}/05.1.2/${d.tahun}`);
-  const tglPerikatan = tglIndo(is50750 ? (d.t.spk_tanggal || d.pl?.spk_tanggal || d.t.tanggal) : (d.t.sp_tanggal || d.t.tanggal));
+  const { perikatanLabel, noPerikatan, tglPerikatan } = dasarPerikatan(d);
   const kal = tglKalimatBast(d.t.bast_tanggal || d.t.tanggal);
 
   const sigTbl = new D.Table({
@@ -1371,12 +1378,7 @@ function baphpPdf(d) {
   drawPartyRow('Nomor RBA', d.rek.kode || '-');
 
   y += 6;
-  const is50750 = d.t.mode_pengadaan === '50_750' || !!d.t.pl_json;
-  const perikatanLabel = is50750 ? 'Surat Perintah Kerja (SPK)' : 'Surat Pesanan (SP)';
-  const noPerikatan = is50750
-    ? (d.t.spk_nomor || d.pl?.spk_nomor || `000.3.2/${d.t.spk_no_urut || d.pl?.spk_no_urut || '2673'}/05.1.2/${d.tahun}`)
-    : (d.t.sp_nomor || `000.3.2/${d.t.sp_no_urut || '1607'}/05.1.2/${d.tahun}`);
-  const tglPerikatan = tglIndo(is50750 ? (d.t.spk_tanggal || d.pl?.spk_tanggal || d.t.tanggal) : (d.t.sp_tanggal || d.t.tanggal));
+  const { perikatanLabel, noPerikatan, tglPerikatan } = dasarPerikatan(d);
   const namaRek = (d.rek?.uraian || '').trim();
   const isianUser = (d.t.uraian || '').trim();
   const paketTxt = namaRek && isianUser && namaRek.toLowerCase() !== isianUser.toLowerCase()
@@ -1441,12 +1443,7 @@ async function baphpDocx(d) {
   const W_PAGE = 11906, M_HORIZ = 1440, W_CONTENT = W_PAGE - 2 * M_HORIZ;
   const defUrut = d.t.baphp_no_urut || (d.t.bast_no_urut ? `${d.t.bast_no_urut}.a` : '1351.a');
   const noBaphp = d.t.baphp_nomor || `000.3.2/${defUrut}/05.1.2/${d.tahun}`;
-  const is50750 = d.t.mode_pengadaan === '50_750' || !!d.t.pl_json;
-  const perikatanLabel = is50750 ? 'Surat Perintah Kerja (SPK)' : 'Surat Pesanan (SP)';
-  const noPerikatan = is50750
-    ? (d.t.spk_nomor || d.pl?.spk_nomor || `000.3.2/${d.t.spk_no_urut || d.pl?.spk_no_urut || '2673'}/05.1.2/${d.tahun}`)
-    : (d.t.sp_nomor || `000.3.2/${d.t.sp_no_urut || '1607'}/05.1.2/${d.tahun}`);
-  const tglPerikatan = tglIndo(is50750 ? (d.t.spk_tanggal || d.pl?.spk_tanggal || d.t.tanggal) : (d.t.sp_tanggal || d.t.tanggal));
+  const { perikatanLabel, noPerikatan, tglPerikatan } = dasarPerikatan(d);
   const kal = tglKalimatBast(d.t.baphp_tanggal || d.t.bast_tanggal || d.t.tanggal);
   const namaRek = (d.rek?.uraian || '').trim();
   const isianUser = (d.t.uraian || '').trim();
@@ -2451,6 +2448,16 @@ const LABEL_DOK_0_2 = {
   verifikasi: '4. LEMBAR VERIFIKASI',
 };
 
+// alur E-Purchasing (HPS hanya untuk nilai di atas Rp100 juta)
+const LABEL_DOK_EPUR = {
+  spektek: '1. SPEKTEK',
+  hps: '2. HPS',
+  penyerahan_pp: '3. SURAT PENYERAHAN PEKERJAAN KE PP',
+  baphp: '4. BAPHP',
+  a2: '5. A2',
+  verifikasi: '6. LEMBAR VERIFIKASI',
+};
+
 const LABEL_DOK_LANGSUNG = {
   a2: '1. A2',
   verifikasi: '2. LEMBAR VERIFIKASI',
@@ -2461,18 +2468,20 @@ async function buatDokumen(id, jenis, format) {
   const d = await ambilData(id);
   if (!d) return null;
   const isLangsung = d.t.tahap === 'spj_langsung';
-  const is50750 = !isLangsung && (d.t.mode_pengadaan === '50_750' || ['undangan', 'evaluasi', 'penetapan', 'kontrak'].includes(d.t.tahap));
-  const is1050 = !isLangsung && !is50750 && (d.t.mode_pengadaan === '10_50' || ['spektek', 'hps', 'spektek_hps', 'negosiasi'].includes(d.t.tahap) || !!d.t.hps_nomor);
-  const is02 = !isLangsung && !is50750 && !is1050 && d.t.mode_pengadaan === '0_10' && Number(d.t.kotor) > 0 && Number(d.t.kotor) <= 2000000;
+  const isEpur = !isLangsung && d.t.mode_pengadaan === 'epur';
+  const is50750 = !isLangsung && !isEpur && (d.t.mode_pengadaan === '50_750' || ['undangan', 'evaluasi', 'penetapan', 'kontrak'].includes(d.t.tahap));
+  const is1050 = !isLangsung && !isEpur && !is50750 && (d.t.mode_pengadaan === '10_50' || ['spektek', 'hps', 'spektek_hps', 'negosiasi'].includes(d.t.tahap) || !!d.t.hps_nomor);
+  const is02 = !isLangsung && !isEpur && !is50750 && !is1050 && d.t.mode_pengadaan === '0_10' && Number(d.t.kotor) > 0 && Number(d.t.kotor) <= 2000000;
   // alur 50–750 jt: dari Undangan PL sampai SPK, nama/uraian paket diambil dari Lingkup pekerjaan (langkah Undangan)
   if (is50750 && d.pl?.lingkup_pekerjaan && !['spektek', 'hps', 'bast', 'baphp', 'a2', 'verifikasi'].includes(jenis)) d.t.uraian = d.pl.lingkup_pekerjaan;
-  const mapLabel = is50750 ? LABEL_DOK_50_750 : (isLangsung ? LABEL_DOK_LANGSUNG : is1050 ? LABEL_DOK_10_50 : is02 ? LABEL_DOK_0_2 : LABEL_DOK_0_10);
+  const mapLabel = isEpur ? LABEL_DOK_EPUR : is50750 ? LABEL_DOK_50_750 : (isLangsung ? LABEL_DOK_LANGSUNG : is1050 ? LABEL_DOK_10_50 : is02 ? LABEL_DOK_0_2 : LABEL_DOK_0_10);
   const prefix = mapLabel[jenis] || LABEL_DOK_50_750[jenis] || LABEL_DOK_10_50[jenis] || jenis.toUpperCase();
   const nama = prefix + ' - ' + ((d.t.penyedia && d.t.penyedia !== '-') ? d.t.penyedia : (d.rek?.uraian || 'Paket')).replace(/[\\/:*?"<>|\n]/g, ' ').trim().slice(0, 70);
   let buffer;
   if (format === 'pdf') {
     const fn = jenis === 'spektek' ? spektekPdf
       : jenis === 'hps' ? hpsPdf
+      : jenis === 'penyerahan_pp' ? docsPl.penyerahanPpPdf
       : jenis === 'undangan_pl' ? docsPl.undanganPlPdf
       : jenis === 'ba_pembukaan' ? docsPl.baPembukaanPdf
       : jenis === 'ba_evaluasi' ? docsPl.baEvaluasiPdf
@@ -2493,6 +2502,7 @@ async function buatDokumen(id, jenis, format) {
   } else {
     const fn = jenis === 'spektek' ? spektekDocx
       : jenis === 'hps' ? hpsDocx
+      : jenis === 'penyerahan_pp' ? docsPl.penyerahanPpDocx
       : jenis === 'undangan_pl' ? docsPl.undanganPlDocx
       : jenis === 'ba_pembukaan' ? docsPl.baPembukaanDocx
       : jenis === 'ba_evaluasi' ? docsPl.baEvaluasiDocx

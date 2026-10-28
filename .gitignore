@@ -3,8 +3,8 @@ node_modules/
 */node_modules/
 
 # Production builds
-dist/
-*/dist/
+#dist/
+#*/dist/
 
 # Environment files
 .env
